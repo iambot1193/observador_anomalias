@@ -86,7 +86,7 @@ def chips_ficticios():
 def main():
     completo = equipamentos_ficticios()
     payload = {
-        "observacao": {"desde": "27-07-2026 08:00:00", "observado": "6d 22.0h", "perdido": "0.5h", "perdidoHoras": 0.5},
+        "observacao": {"desde": "27-07-2026 08:00:00", "observado": "6d 22h", "perdido": "30m", "perdidoHoras": 0.5},
         "completo": completo,
         "filtrado": completo,
         "chips": chips_ficticios(),

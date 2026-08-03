@@ -51,15 +51,22 @@ def carregar():
 
 def agregar(linhas, ciclos):
     por_codigo = defaultdict(lambda: {"ciclos": 0, "resets": 0, "primeiro": None, "ultimo": None})
+    # ponytail: comparar os dt parseados, não a string "registrada" direto - "DD-MM-YYYY" como
+    # string ordena errado entre meses/dias diferentes (bug real encontrado 2026-08-03: "01-08"
+    # perdia pra "31-07" porque '0' < '3' no primeiro caractere, mesmo Ago vindo depois de Jul).
+    primeiro_dt, ultimo_dt = {}, {}
     por_ciclo = defaultdict(set)  # registrada -> set de codigos offline naquele ciclo
     for codigo, registrada, reset in linhas:
         d = por_codigo[codigo]
         d["ciclos"] += 1
         if reset.strip().lower() == "sim":
             d["resets"] += 1
-        if d["primeiro"] is None or registrada < d["primeiro"]:
+        dt = datetime.strptime(registrada, FMT)
+        if codigo not in primeiro_dt or dt < primeiro_dt[codigo]:
+            primeiro_dt[codigo] = dt
             d["primeiro"] = registrada
-        if d["ultimo"] is None or registrada > d["ultimo"]:
+        if codigo not in ultimo_dt or dt > ultimo_dt[codigo]:
+            ultimo_dt[codigo] = dt
             d["ultimo"] = registrada
         por_ciclo[registrada].add(codigo)
 
@@ -93,10 +100,12 @@ def agregar(linhas, ciclos):
 
 
 def fmt_horas(h):
-    if h < 24:
-        return f"{h:.1f}h"
-    d = int(h // 24)
-    return f"{d}d {h - d*24:.1f}h"
+    """8d 16h 12m / 3d 16h / 16h 12m / 16h - sem decimais confusas (16.2h != "16h e 2min")."""
+    total_min = round(h * 60)
+    d, resto_min = divmod(total_min, 24 * 60)
+    hh, mm = divmod(resto_min, 60)
+    partes = ([f"{d}d"] if d else []) + [f"{hh}h"] + ([f"{mm}m"] if mm else [])
+    return " ".join(partes)
 
 
 def calcular_perdido(timestamps, limite_min=GAP_LIMITE_MIN):
@@ -310,15 +319,16 @@ def main():
           f"Observado {obs['observado']}, perdido {obs['perdido']}.")
 
 
-# ponytail: Chart.js via CDN. Se precisar 100% offline, baixar chart.umd.min.js
-# pra pasta e trocar o src abaixo.
+# ponytail: Chart.js via CDN (a máquina do monitor está online). Se precisar 100%
+# offline, baixar chart.umd.min.js pra pasta e trocar o src.
 TEMPLATE = r"""<!doctype html>
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Observador de Anomalias</title>
+<title>Observador Raptor — comunicação dos equipamentos</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   :root{ --border:rgba(255,255,255,.10) }
   *{box-sizing:border-box}
@@ -331,28 +341,44 @@ TEMPLATE = r"""<!doctype html>
   ::-webkit-scrollbar-corner{background:#13151E}
   body{margin:0;background:#05060A;color:#F5F6FA;
     font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.45}
-  .wrap{max-width:1100px;margin:0 auto;padding:28px 20px 60px}
+  .wrap{display:flex;flex-direction:column;align-items:stretch;
+    max-width:1280px;width:100%;margin:0 auto;padding:28px 20px 60px}
+  .tabPanel{display:flex;flex-direction:column;align-items:stretch;gap:24px}
+  .panelHeader{display:flex;flex-direction:column}
   h1{font-size:22px;margin:0 0 2px}
   .sub{font-size:13px;margin:0 0 20px;opacity:.65}
-  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0;margin-bottom:26px}
-  .tile{padding:4px 20px;cursor:default}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0}
+  #tiles{grid-template-columns:repeat(6,1fr)}
+  #kpiRow{grid-template-columns:repeat(4,1fr)}
+  @media (max-width:860px){#tiles,#kpiRow{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}}
+  .tile{padding:8px 20px 6px;cursor:default}
   .tile:not(:first-child){border-left:1px solid rgba(255,255,255,.10)}
-  .tile .v{font-size:28px;font-weight:700;letter-spacing:-.5px}
-  .tile .k{font-size:12px;opacity:.65;margin-top:2px}
-  .card{border-radius:14px;padding:18px 18px 8px;margin-bottom:22px}
+  .tile .v{font-size:28px;font-weight:700;letter-spacing:-.5px;line-height:1.25}
+  .tile .k{font-size:12px;opacity:.65;margin-top:4px;line-height:1.3}
+  .card{border-radius:14px;padding:18px 18px 8px;width:100%}
   .card h2{font-size:15px;margin:0 0 2px}
   .card p{font-size:12.5px;opacity:.65;margin:0 0 14px}
   .chart{position:relative;height:340px}
   .chart.short{height:250px}
   table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
-  th,td{text-align:right;padding:8px 10px;border-bottom:1px solid var(--border)}
+  th,td{text-align:right;padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
   th:first-child,td:first-child{text-align:left;font-variant-numeric:normal}
+  .mono{font-family:'SFMono-Regular',Consolas,'Liberation Mono',monospace}
+  .detailsToggle{cursor:pointer;font-size:13px;opacity:.85;list-style:none;user-select:none;
+    display:inline-flex;align-items:center;gap:6px;margin-top:4px;padding:8px 14px;
+    border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,.05)}
+  .detailsToggle::-webkit-details-marker{display:none}
+  .detailsToggle::before{content:'▶';font-size:9px;transition:transform .15s}
+  details[open]>.detailsToggle::before{transform:rotate(90deg)}
+  .detailsToggle:hover{background:rgba(255,255,255,.09)}
   th{font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:rgba(245,246,250,.55)}
   details summary{cursor:pointer;font-size:13px;margin-top:4px;opacity:.7}
   .chk{display:inline-flex;align-items:center;gap:8px;font-size:14px;opacity:.75;
-    margin:-8px 0 22px;cursor:pointer}
+    margin:-8px 0 0;cursor:pointer}
   .chk input{width:20px;height:20px;cursor:pointer}
-  .tabs{display:flex;gap:8px;margin-bottom:22px;border-bottom:1px solid var(--border)}
+  .tabs{display:flex;gap:8px;margin-bottom:22px;border-bottom:1px solid var(--border);
+    position:sticky;top:0;z-index:50;background:rgba(5,6,10,.85);backdrop-filter:blur(12px);
+    -webkit-backdrop-filter:blur(12px);box-shadow:0 2px 12px rgba(0,0,0,.35)}
   .tabBtn{padding:9px 16px;border:none;background:transparent;color:inherit;opacity:.55;
     font-size:13.5px;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
   .tabBtn.active{opacity:1;border-bottom-color:#2563EB}
@@ -362,23 +388,38 @@ TEMPLATE = r"""<!doctype html>
   #tabEquip .card,#tabChips .card{
     background:rgba(255,255,255,.04);backdrop-filter:blur(16px);
     -webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.09)}
-  #tabEquip .tile.alerta .v,#tabChips .tile.alerta .v{color:#FF4D4D}
-  #tabChips .tile.ok .v{color:#00E676}
+  #tabEquip .tile.alerta .v,#tabChips .tile.alerta .v{color:#EF4444}
+  #tabChips .tile.ok .v{color:#10B981}
 
   .biRow4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
-  .biRow4 .chart{transition:transform .15s ease,box-shadow .15s ease;border-radius:10px}
-  .biRow4 .chart:hover{transform:scale(1.03);box-shadow:0 8px 24px rgba(37,99,235,.22)}
+  .biRow4 .chart{border-radius:10px}
   @media (max-width:980px){.biRow4{grid-template-columns:1fr 1fr}}
   @media (max-width:560px){.biRow4{grid-template-columns:1fr}}
 
-  .filtros{display:flex;gap:10px;flex-wrap:wrap;margin:22px 0 14px}
+  .tlMiniCards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
+  .tlMiniCard{background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:10px;padding:10px 14px}
+  .tlMiniCard .v{font-size:20px;font-weight:700}
+  .tlMiniCard .k{font-size:11.5px;opacity:.65;margin-top:2px}
+  @media (max-width:560px){.tlMiniCards{grid-template-columns:1fr}}
+  .periodoBtns{display:inline-flex;gap:2px;padding:4px;margin:0 0 14px;
+    background:rgba(255,255,255,.04);border-radius:10px}
+
+  .tableCard{width:100%;
+    background:#12141c;border:1px solid rgba(255,255,255,.09);border-radius:14px;overflow:hidden}
+  .tableCard .filtros,.tableCard .statusChips,.tableCard .filtrosAtivos,.tableCard .tableToolbar{
+    padding-left:20px;padding-right:20px}
+  .tableCard .tableToolbar{padding-top:14px;padding-bottom:14px;margin:0;border-bottom:1px solid rgba(255,255,255,.09)}
+
+  .filtros{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0;padding-top:14px;padding-bottom:10px}
   .filtros input,.filtros select{padding:9px 12px;border-radius:8px;border:1px solid var(--border);
     background:rgba(255,255,255,.05);color:inherit;font-size:13px}
   .filtros input{flex:1;min-width:220px}
   .filtros select option{background:#13151E;color:#F1F5F9}
   .filtros select option:hover,.filtros select option:checked,.filtros select option:focus{background:#2563EB;color:#fff}
-  .statusChips{display:flex;gap:20px;flex-wrap:wrap;margin-bottom:14px;border-bottom:1px solid var(--border)}
-  .chipBtn{padding:8px 14px;border:none;border-radius:8px;background:none;
+  .filtrosAcoes{display:flex;gap:10px;margin-left:auto;position:relative}
+  .statusChips{display:inline-flex;align-items:center;gap:2px;margin:0 0 14px;padding:4px;
+    background:rgba(255,255,255,.04);border-radius:10px}
+  .chipBtn{padding:7px 14px;border:none;border-radius:7px;background:none;
     color:inherit;opacity:.6;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;
     transition:opacity .15s,background-color .15s}
   .chipBtn:hover{opacity:.9;background:rgba(255,255,255,.06)}
@@ -386,7 +427,7 @@ TEMPLATE = r"""<!doctype html>
   .chipBtn b{margin-left:0;background:rgba(255,255,255,.08);padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600}
   .chipBtn.active b{background:rgba(37,99,235,.3);color:#93C5FD}
 
-  .filtrosAtivos{display:none;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+  .filtrosAtivos{display:none;align-items:center;gap:8px;flex-wrap:wrap;margin:0;padding-top:14px}
   .filtroBadge{background:rgba(37,99,235,.18);border:1px solid rgba(37,99,235,.4);border-radius:20px;
     padding:5px 10px;font-size:12px;cursor:pointer}
   .filtroBadge b{margin-left:5px;opacity:.7}
@@ -396,15 +437,15 @@ TEMPLATE = r"""<!doctype html>
   .badge{padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600;white-space:nowrap;
     display:inline-flex;align-items:center;gap:5px}
   .badge .dot{width:7px;height:7px;border-radius:50%;display:inline-block}
-  .badge.atualizado{background:rgba(0,230,118,.14);color:#00E676}
-  .badge.atualizado .dot{background:#00E676}
-  .badge.atrasado{background:rgba(255,193,7,.16);color:#FFC107}
-  .badge.atrasado .dot{background:#FFC107}
-  .badge.sem_comunicacao{background:rgba(255,77,77,.14);color:#FF4D4D}
-  .badge.sem_comunicacao .dot{background:#FF4D4D}
-  tr.linhaCritica{background:rgba(255,77,77,.07)}
+  .badge.atualizado{background:rgba(16,185,129,.14);color:#10B981}
+  .badge.atualizado .dot{background:#10B981}
+  .badge.atrasado{background:rgba(245,158,11,.16);color:#F59E0B}
+  .badge.atrasado .dot{background:#F59E0B}
+  .badge.sem_comunicacao{background:rgba(239,68,68,.14);color:#EF4444}
+  .badge.sem_comunicacao .dot{background:#EF4444}
+  tr.linhaCritica{background:rgba(239,68,68,.07)}
 
-  .tableToolbar{display:flex;gap:10px;align-items:center;margin:0 0 10px;position:relative}
+  .tableToolbar{display:flex;gap:10px;align-items:center;position:relative}
   .tbBtn{padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,.05);
     color:inherit;font-size:12.5px;cursor:pointer}
   .colunasMenu{display:none;position:absolute;top:38px;left:0;z-index:20;background:#12141c;
@@ -416,18 +457,28 @@ TEMPLATE = r"""<!doctype html>
     border-radius:6px;padding:5px 0;font-size:11.5px;cursor:pointer}
   .colunasAcoes button:hover{background:rgba(37,99,235,.18)}
 
-  .tableWrap{position:relative;width:calc(100% + 100px);margin-left:-50px;margin-right:-50px;
-    background:#12141c;border:1px solid rgba(255,255,255,.09);
-    border-radius:14px;max-height:640px;overflow-y:auto;overflow-x:auto;padding:0}
+  .tableWrap{position:relative;max-height:640px;overflow-y:auto;overflow-x:auto;padding:0}
   .tableWrap table{margin:0;border-collapse:separate;border-spacing:0}
-  .tableWrap td,.tableWrap th{padding:12px 16px;white-space:nowrap}
+  .tableWrap td,.tableWrap th{height:48px;padding:0 16px;white-space:nowrap;box-sizing:border-box}
   .tableWrap th{position:sticky !important;top:0 !important;background-color:#13151E !important;
     background-clip:padding-box;cursor:pointer;user-select:none;z-index:100 !important;
     box-shadow:0 2px 5px rgba(0,0,0,.5)}
+  .tableWrap tbody tr:hover{background:rgba(255,255,255,.04)}
   .tableWrap th[data-col]:hover{color:rgba(245,246,250,.85)}
   .tableWrap th[data-col]::after{content:'⇅';margin-left:5px;opacity:.3;font-size:10px}
   .tableWrap th.sortAsc::after{content:'▲';opacity:1;color:#2563EB}
   .tableWrap th.sortDesc::after{content:'▼';opacity:1;color:#2563EB}
+
+  /* Tabela de chips: coluna Cliente fixa na rolagem horizontal + alinhamento por tipo de coluna */
+  #tabelaChips td:first-child,#tabelaChips th:first-child{position:sticky;left:0;background-color:#12141c;z-index:2}
+  #tabelaChips thead th:first-child{z-index:101 !important}
+  #tabelaChips tbody tr:hover td:first-child{background-color:#181b26}
+  #tabelaChips td:nth-child(2),#tabelaChips td:nth-child(3),#tabelaChips td:nth-child(4),
+  #tabelaChips td:nth-child(5),#tabelaChips td:nth-child(6),#tabelaChips td:nth-child(8),
+  #tabelaChips th:nth-child(2),#tabelaChips th:nth-child(3),#tabelaChips th:nth-child(4),
+  #tabelaChips th:nth-child(5),#tabelaChips th:nth-child(6),#tabelaChips th:nth-child(8){text-align:left}
+  #tabelaChips td:last-child,#tabelaChips th:last-child{text-align:center}
+  .vazio{opacity:.35}
 
   .rowMenu{position:relative}
   .rowMenu summary{list-style:none;cursor:pointer;text-align:center;opacity:.6;font-size:16px}
@@ -458,25 +509,34 @@ TEMPLATE = r"""<!doctype html>
   </div>
 
   <div id="tabEquip" class="tabPanel">
-    <h1>Comunicação dos equipamentos</h1>
-    <p class="sub">A planilha registra os equipamentos <b>fora do ar</b> a cada ciclo (~1&nbsp;min).
-       Mais ciclos = mais tempo sem comunicar. Observando desde <span id="desde"></span>.
-       Gerado em <span id="ger"></span>.</p>
-
-    <label class="chk"><input type="checkbox" id="chkSem16"> Remover exceções das métricas visuais</label>
+    <div class="panelHeader">
+      <h1>Comunicação dos equipamentos</h1>
+      <p class="sub">A planilha registra os equipamentos <b>fora do ar</b> a cada ciclo (~1&nbsp;min).
+         Mais ciclos = mais tempo sem comunicar. Observando desde <span id="desde"></span>.
+         Gerado em <span id="ger"></span>.</p>
+      <label class="chk"><input type="checkbox" id="chkSem16"> Remover exceções das métricas visuais</label>
+    </div>
 
     <div class="tiles" id="tiles"></div>
 
     <div class="card">
       <h2>Quanto cada equipamento ficou fora do ar</h2>
-      <p>Total de ciclos registrados por código (cada ciclo ≈ 1 minuto offline).</p>
+      <p>Tempo total offline por código (cada ciclo ≈ 1 minuto). <span style="color:#EF4444">Vermelho</span> ≥24h,
+         <span style="color:#F59E0B">amarelo</span> 5h–24h, <span style="color:#2563EB">azul</span> abaixo de 5h.</p>
+      <label class="chk" style="margin:0 0 10px"><input type="checkbox" id="chkOcultarMaior"> Ocultar o maior valor (ver proporção dos demais)</label>
       <div class="chart" id="wrapRank"><canvas id="rank"></canvas></div>
     </div>
 
     <div class="card">
-      <h2>Quantos ficaram sem comunicar ao mesmo tempo</h2>
-      <p>Cada ciclo grava <b>uma linha por equipamento</b> offline — todos entram, não só um.
-         Aqui: nº de equipamentos simultaneamente fora do ar ao longo do tempo.</p>
+      <h2>Equipamentos Simultaneamente Offline</h2>
+      <p>Histórico de indisponibilidade ao longo do tempo.</p>
+      <div class="periodoBtns" id="periodoTl">
+        <button class="chipBtn active" data-periodo="0">Tudo</button>
+        <button class="chipBtn" data-periodo="1">24h</button>
+        <button class="chipBtn" data-periodo="7">7 dias</button>
+        <button class="chipBtn" data-periodo="30">30 dias</button>
+      </div>
+      <div class="tlMiniCards" id="tlMiniCards"></div>
       <div class="chart" id="wrapTl"><canvas id="tl"></canvas></div>
     </div>
 
@@ -487,82 +547,92 @@ TEMPLATE = r"""<!doctype html>
     </div>
 
     <details open>
-      <summary>Ver tabela</summary>
+      <summary class="detailsToggle">Ver tabela</summary>
       <div class="tableWrap" style="max-height:480px">
-        <table><thead><tr><th>Código</th><th>Ciclos offline</th><th>Resets enviados</th>
-          <th>Primeiro</th><th>Último</th></tr></thead><tbody id="tbody"></tbody></table>
+        <table id="tabelaRanking"><thead><tr>
+          <th data-col="codigo" data-type="text">Código</th>
+          <th data-col="ciclos" data-type="num">Ciclos offline</th>
+          <th data-col="resets" data-type="num">Resets enviados</th>
+          <th data-col="primeiro" data-type="date">Primeiro</th>
+          <th data-col="ultimo" data-type="date">Último</th>
+        </tr></thead><tbody id="tbody"></tbody></table>
       </div>
     </details>
   </div>
 
   <div id="tabChips" class="tabPanel" style="display:none">
-    <h1>Chips e consumo</h1>
-    <p class="sub" id="chipsErro" style="display:none">Não foi possível carregar os dados da API.</p>
-    <p class="sub" id="chipsSync"></p>
+    <div class="panelHeader">
+      <h1>Chips e consumo</h1>
+      <p class="sub" id="chipsErro" style="display:none">Não foi possível carregar os dados da API.</p>
+      <p class="sub" id="chipsSync"></p>
+    </div>
 
     <div class="tiles" id="kpiRow"></div>
 
     <div class="biRow4">
       <div class="card">
         <h2>Status de conexão</h2>
-        <p>Clique numa fatia pra filtrar a tabela.</p>
+        <p>Clique em uma fatia para filtrar a tabela.</p>
         <div class="chart short"><canvas id="chipsStatusChart"></canvas></div>
       </div>
       <div class="card">
         <h2>Quantidade por cliente</h2>
-        <p>Clique numa barra pra filtrar a tabela.</p>
+        <p>Clique em uma barra para filtrar a tabela.</p>
         <div class="chart short"><canvas id="chipsClienteChart"></canvas></div>
       </div>
       <div class="card">
         <h2>Quantidade por operadora</h2>
-        <p>Clique numa fatia pra filtrar a tabela.</p>
+        <p>Clique em uma fatia para filtrar a tabela.</p>
         <div class="chart short"><canvas id="chipsOperadoraChart"></canvas></div>
       </div>
       <div class="card">
         <h2>Faixa de consumo</h2>
-        <p>Clique numa fatia pra filtrar a tabela.</p>
+        <p>Clique em uma fatia para filtrar a tabela.</p>
         <div class="chart short"><canvas id="chipsConsumoChart"></canvas></div>
       </div>
     </div>
 
-    <div class="filtros">
-      <input id="fBusca" type="text" placeholder="Buscar por código, ICCID, telefone, cliente ou cidade...">
-      <select id="fCliente"><option value="">Todos os clientes</option></select>
-      <select id="fOperadora"><option value="">Todas as operadoras</option></select>
-      <select id="fCidade"><option value="">Todas as cidades</option></select>
-    </div>
-    <div class="statusChips" id="statusChips">
-      <button class="chipBtn active" data-status="">Todos <b id="cntTodos">0</b></button>
-      <button class="chipBtn" data-status="atualizado">Atualizados <b id="cntAtualizado">0</b></button>
-      <button class="chipBtn" data-status="atrasado">Atrasados <b id="cntAtrasado">0</b></button>
-      <button class="chipBtn" data-status="sem_comunicacao">Sem comunicação <b id="cntSemComunicacao">0</b></button>
-    </div>
-    <div class="filtrosAtivos" id="filtrosAtivos"></div>
+    <div class="tableCard">
+      <div class="filtros">
+        <input id="fBusca" type="text" placeholder="Buscar por código, ICCID, telefone, cliente ou cidade...">
+        <select id="fCliente"><option value="">Todos os clientes</option></select>
+        <select id="fOperadora"><option value="">Todas as operadoras</option></select>
+        <select id="fCidade"><option value="">Todas as cidades</option></select>
+        <div class="filtrosAcoes">
+          <button class="tbBtn" id="btnColunas">Colunas ▾</button>
+          <div class="colunasMenu" id="colunasMenu"></div>
+          <button class="tbBtn" id="btnExportarCsv">Exportar CSV</button>
+          <button class="tbBtn" id="btnExportarXlsx">Exportar XLSX</button>
+        </div>
+      </div>
+      <div class="statusChips" id="statusChips">
+        <button class="chipBtn active" data-status="">Todos <b id="cntTodos">0</b></button>
+        <button class="chipBtn" data-status="atualizado">Atualizados <b id="cntAtualizado">0</b></button>
+        <button class="chipBtn" data-status="atrasado">Atrasados <b id="cntAtrasado">0</b></button>
+        <button class="chipBtn" data-status="sem_comunicacao">Sem comunicação <b id="cntSemComunicacao">0</b></button>
+      </div>
+      <div class="filtrosAtivos" id="filtrosAtivos"></div>
 
-    <div class="tableToolbar">
-      <button class="tbBtn" id="btnColunas">Colunas ▾</button>
-      <div class="colunasMenu" id="colunasMenu"></div>
-      <button class="tbBtn" id="btnExportar">Exportar CSV</button>
+      <div class="tableWrap" id="tableWrap">
+        <table id="tabelaChips"><thead><tr>
+          <th data-col="cliente" data-type="text">Cliente</th>
+          <th data-col="codigo" data-type="text">Código</th>
+          <th data-col="iccid" data-type="text">ICCID</th>
+          <th data-col="telefone" data-type="text">Telefone</th>
+          <th data-col="cidade" data-type="text">Cidade</th>
+          <th data-col="operadora" data-type="text">Operadora</th>
+          <th data-col="ultimaComunicacao" data-type="date">Última comunicação</th>
+          <th data-col="status" data-type="text">Status</th>
+          <th data-col="franquiaMb" data-type="num">Franquia</th>
+          <th data-col="consumidoMb" data-type="num">Consumido</th>
+          <th data-col="restanteMb" data-type="num">Restante</th>
+          <th data-col="pct" data-type="num">%</th>
+          <th></th>
+        </tr></thead>
+        <tbody id="tbodyChips"></tbody></table>
+      </div>
     </div>
 
-    <div class="tableWrap" id="tableWrap">
-      <table id="tabelaChips"><thead><tr>
-        <th data-col="cliente" data-type="text">Cliente</th>
-        <th data-col="codigo" data-type="text">Código</th>
-        <th data-col="iccid" data-type="text">ICCID</th>
-        <th data-col="telefone" data-type="text">Telefone</th>
-        <th data-col="cidade" data-type="text">Cidade</th>
-        <th data-col="operadora" data-type="text">Operadora</th>
-        <th data-col="ultimaComunicacao" data-type="date">Última comunicação</th>
-        <th data-col="status" data-type="text">Status</th>
-        <th data-col="franquiaMb" data-type="num">Franquia</th>
-        <th data-col="consumidoMb" data-type="num">Consumido</th>
-        <th data-col="restanteMb" data-type="num">Restante</th>
-        <th data-col="pct" data-type="num">%</th>
-        <th></th>
-      </tr></thead>
-      <tbody id="tbodyChips"></tbody></table>
-    </div>
   </div>
 </div>
 
@@ -577,64 +647,290 @@ TEMPLATE = r"""<!doctype html>
 <script>
 const PAYLOAD = __DADOS__;
 // ponytail: paletas fixas por tema (não dependem de prefers-color-scheme — os dois temas são sempre escuros)
-const EQUIP = {blue:'#2563EB', red:'#FF4D4D', amber:'#FFC107', green:'#00E676',
+// ponytail: paleta suavizada (2026-08-03) - neon (#FF4D4D/#FFC107/#00E676) trocado por
+// tons mais elegantes de dark mode; badges em CSS (.badge.*) usam os mesmos hex, manter em sincronia
+const EQUIP = {blue:'#2563EB', red:'#EF4444', amber:'#F59E0B', green:'#10B981',
   ink:'#F5F6FA', ink2:'#9CA3AF', muted:'#6B7280', grid:'#20232F'};
-const PAL = {blue:'#2563EB', red:'#FF4D4D', amber:'#FFC107', green:'#00E676',
+const PAL = {blue:'#2563EB', red:'#EF4444', amber:'#F59E0B', green:'#10B981',
   ink:'#F5F6FA', ink2:'rgba(245,246,250,.62)', muted:'rgba(245,246,250,.42)', grid:'rgba(255,255,255,.08)'};
 const INK=EQUIP.ink, INK2=EQUIP.ink2, MUTED=EQUIP.muted, GRID=EQUIP.grid, BLUE=EQUIP.blue, RED=EQUIP.red;
 Chart.defaults.font.family = 'system-ui,-apple-system,"Segoe UI",sans-serif';
 Chart.defaults.color = '#9CA3AF';
+Chart.defaults.plugins.tooltip.backgroundColor = 'rgba(15,17,24,.95)';
+Chart.defaults.plugins.tooltip.padding = 10;
+Chart.defaults.plugins.tooltip.boxPadding = 6;
+Chart.defaults.plugins.tooltip.titleColor = '#F5F6FA';
+Chart.defaults.plugins.tooltip.bodyColor = '#E2E8F0';
+Chart.defaults.plugins.tooltip.cornerRadius = 8;
 const grid = {color:GRID, drawTicks:false, drawBorder:false};
 function hexAlpha(hex, a){
   const n = parseInt(hex.replace('#',''),16);
   return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
 }
+function fmtNum(n){ return Number(n).toLocaleString('pt-BR'); }
+// ponytail: ciclo ~ 1min - converte pra "Xd Yh Zm" em vez de forçar cálculo mental no usuário
+function fmtMin(min){
+  min = Math.round(min);
+  const d = Math.floor(min/1440), h = Math.floor((min%1440)/60), m = min%60;
+  return ([d?`${d}d`:'', `${h}h`, m?`${m}m`:''].filter(Boolean)).join(' ');
+}
+function fmtDataCurta(ts){
+  if (!ts) return '';
+  const [data, hora] = ts.split(' ');
+  const [d,m] = data.split('-');
+  return `${d}/${m} ${(hora||'').slice(0,5)}`;
+}
+const MESES_ABREV = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+function fmtEixoTl(ts){
+  const [data, hora] = ts.split(' ');
+  const [d,m] = data.split('-');
+  return `${d}/${MESES_ABREV[+m-1]} ${hora.slice(0,5)}`;
+}
+function parseTs(ts){
+  const [data, hora] = ts.split(' ');
+  const [d,m,a] = data.split('-').map(Number);
+  const [hh,mi,ss] = hora.split(':').map(Number);
+  return new Date(a, m-1, d, hh, mi, ss);
+}
+function filtrarTimelinePorPeriodo(timeline, dias){
+  if (!dias || !timeline.length) return timeline;
+  const corte = parseTs(timeline[timeline.length-1].t).getTime() - dias*86400000;
+  return timeline.filter(p => parseTs(p.t).getTime() >= corte);
+}
+// --- Callout permanente no ponto de pico (data/hora do evento, não só o tooltip) ---
+const picoCalloutPlugin = {
+  id: 'picoCallout',
+  afterDatasetsDraw(chart){
+    const cfg = chart.options.plugins.picoCallout;
+    if (!cfg || cfg.indice==null) return;
+    const pt = chart.getDatasetMeta(0).data[cfg.indice];
+    if (!pt) return;
+    const {ctx} = chart;
+    ctx.save();
+    ctx.font = '600 11px system-ui,-apple-system,"Segoe UI",sans-serif';
+    const largura = ctx.measureText(cfg.texto).width + 16;
+    const x = Math.min(Math.max(pt.x - largura/2, chart.chartArea.left+4), chart.chartArea.right - largura - 4);
+    const y = Math.max(pt.y - 32, chart.chartArea.top + 4);
+    ctx.fillStyle = 'rgba(239,68,68,.95)';
+    ctx.beginPath();
+    ctx.roundRect(x, y, largura, 22, 6);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(cfg.texto, x+8, y+11);
+    ctx.restore();
+  }
+};
+// ponytail: mesmos limiares do texto (>=24h crítico, >=5h atenção) - ajustar aqui se mudar o critério
+function severidade(min){
+  if (min >= 1440) return 'critico';
+  if (min >= 300) return 'atencao';
+  return 'baixo';
+}
+function corSeveridade(min){
+  const s = severidade(min);
+  return s==='critico' ? RED : s==='atencao' ? PAL.amber : BLUE;
+}
+
+// --- Rosca com total no centro (aproveita o furo em vez de deixar vazio) ---
+const centroRoscaPlugin = {
+  id: 'centroRosca',
+  afterDraw(chart){
+    const cfg = chart.options.plugins.centroRosca;
+    if (!cfg) return;
+    const {ctx, chartArea:{left,right,top,bottom}} = chart;
+    const cx = (left+right)/2, cy = (top+bottom)/2;
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = PAL.ink;
+    ctx.font = '700 26px system-ui,-apple-system,"Segoe UI",sans-serif';
+    ctx.fillText(cfg.valor, cx, cy - 8);
+    ctx.fillStyle = PAL.ink2;
+    ctx.font = '12px system-ui,-apple-system,"Segoe UI",sans-serif';
+    ctx.fillText(cfg.rotulo, cx, cy + 14);
+    ctx.restore();
+  }
+};
+
+// --- Legenda com contagem + porcentagem (em vez de só a cor+nome) ---
+function legendComContagem(){
+  return {
+    generateLabels(chart){
+      const ds = chart.data.datasets[0];
+      const total = ds.data.reduce((a,b)=>a+b,0) || 1;
+      return chart.data.labels.map((l,i)=>({
+        text: `${l}: ${fmtNum(ds.data[i])} (${(ds.data[i]/total*100).toFixed(1)}%)`,
+        fillStyle: ds.backgroundColor[i], strokeStyle: ds.backgroundColor[i], index: i,
+      }));
+    }
+  };
+}
+
+// --- Ordenação tri-estado reutilizável (cabeçalhos data-col) ---
+function criarOrdenacao(tabelaId, cols, aoOrdenar){
+  let sortCol = null, sortDir = 0;
+  document.querySelectorAll(`#${tabelaId} th[data-col]`).forEach(th=>{
+    th.addEventListener('click', ()=>{
+      const col = th.dataset.col;
+      if (sortCol !== col) { sortCol = col; sortDir = 1; }
+      else { sortDir = sortDir===1?2:(sortDir===2?0:1); if (sortDir===0) sortCol=null; }
+      document.querySelectorAll(`#${tabelaId} th[data-col]`).forEach(h=>h.classList.remove('sortAsc','sortDesc'));
+      if (sortCol) th.classList.add(sortDir===1?'sortAsc':'sortDesc');
+      aoOrdenar();
+    });
+  });
+  return function ordenar(lista){
+    if (!sortCol || sortDir===0) return lista;
+    const tipo = cols.find(c=>c.key===sortCol).type;
+    return [...lista].sort((a,b)=>{
+      let va=a[sortCol], vb=b[sortCol];
+      const aNull = va===null||va===undefined||va==='', bNull = vb===null||vb===undefined||vb==='';
+      if (aNull && bNull) return 0;
+      if (aNull) return 1;
+      if (bNull) return -1;
+      if (tipo==='num'){ va=Number(va); vb=Number(vb); }
+      else if (tipo==='date'){ va=new Date(va).getTime(); vb=new Date(vb).getTime(); }
+      else { va=String(va).toLowerCase(); vb=String(vb).toLowerCase(); }
+      if (va<vb) return sortDir===1?-1:1;
+      if (va>vb) return sortDir===1?1:-1;
+      return 0;
+    });
+  };
+}
+
+// --- Exportação CSV/XLSX reutilizável, respeitando filtro/ordenação atuais ---
+function exportarTabela(nomeBase, cols, linhas, formato){
+  if (formato === 'xlsx') {
+    const dados = linhas.map(x => { const o={}; cols.forEach(c=>{ o[c.label] = c.fmt ? c.fmt(x) : (x[c.key] ?? ''); }); return o; });
+    const ws = XLSX.utils.json_to_sheet(dados);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Dados');
+    XLSX.writeFile(wb, `${nomeBase}.xlsx`);
+  } else {
+    const linhasCsv = [cols.map(c=>c.label).join(';')].concat(linhas.map(x=>
+      cols.map(c=>`"${((c.fmt ? c.fmt(x) : x[c.key]) ?? '').toString().replace(/"/g,'""')}"`).join(';')));
+    const blob = new Blob(['﻿'+linhasCsv.join('\n')], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${nomeBase}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+}
 
 document.getElementById('ger').textContent = PAYLOAD.completo.gerado_em;
 document.getElementById('desde').textContent = PAYLOAD.observacao.desde || '—';
 
+// --- Rótulo (tempo + valor bruto) desenhado no fim de cada barra horizontal ---
+const rotuloBarraPlugin = {
+  id: 'rotuloBarra',
+  afterDatasetsDraw(chart){
+    const {ctx} = chart;
+    const meta = chart.getDatasetMeta(0);
+    ctx.save();
+    ctx.font = '11px system-ui,-apple-system,"Segoe UI",sans-serif';
+    ctx.fillStyle = INK2;
+    ctx.textBaseline = 'middle';
+    meta.data.forEach((bar, i)=>{
+      const v = chart.data.datasets[0].data[i];
+      ctx.fillText(`${fmtMin(v)} (${fmtNum(v)})`, bar.x + 6, bar.y);
+    });
+    ctx.restore();
+  }
+};
+
+const COLS_RANKING = [
+  {key:'codigo', label:'Código', type:'text'}, {key:'ciclos', label:'Ciclos offline', type:'num'},
+  {key:'resets', label:'Resets enviados', type:'num'},
+  {key:'primeiro', label:'Primeiro', type:'date'}, {key:'ultimo', label:'Último', type:'date'},
+];
+let dadosAtual = PAYLOAD.completo;
+let ocultarMaior = false;
+let periodoTl = 0;
+const ordenarRanking = criarOrdenacao('tabelaRanking', COLS_RANKING, ()=>renderTbody(dadosAtual));
+
+function renderTbody(D){
+  const linhas = ordenarRanking(D.ranking);
+  document.getElementById('tbody').innerHTML = linhas.map(r=>{
+    const critico = severidade(r.ciclos)==='critico';
+    return `<tr class="${critico?'linhaCritica':''}">
+      <td class="mono">${r.codigo} ${critico?'<span class="badge sem_comunicacao"><span class="dot"></span>CRÍTICO</span>':''}</td>
+      <td class="mono">${fmtNum(r.ciclos)}</td>
+      <td class="mono">${fmtNum(r.resets)}</td>
+      <td title="${r.primeiro||''}">${fmtDataCurta(r.primeiro)}</td>
+      <td title="${r.ultimo||''}">${fmtDataCurta(r.ultimo)}</td>
+    </tr>`;
+  }).join('');
+}
+
 let charts = {};
 function render(D){
+  dadosAtual = D;
   const T = D.totais;
   document.getElementById('tiles').innerHTML = [
     ['Tempo observado', PAYLOAD.observacao.observado, ''],
     ['Tempo perdido (falha do script)', PAYLOAD.observacao.perdido, PAYLOAD.observacao.perdidoHoras>0?'alerta':''],
-    ['Equipamentos com falha', T.equipamentos, ''],
-    ['Ciclos offline (~min)', T.ciclosOffline, ''],
-    ['Resets enviados', T.resets, ''],
-    ['Pico simultâneo', T.pico, T.pico>1?'alerta':''],
+    ['Equipamentos com falha', fmtNum(T.equipamentos), ''],
+    ['Ciclos offline (~min)', fmtNum(T.ciclosOffline), ''],
+    ['Resets enviados', fmtNum(T.resets), ''],
+    ['Pico simultâneo', fmtNum(T.pico), T.pico>1?'alerta':''],
   ].map(([k,v,c])=>`<div class="tile ${c}"><div class="v">${v}</div><div class="k">${k}</div></div>`).join('');
 
   Object.values(charts).forEach(c=>c.destroy());
 
-  // Ranking — barras horizontais, uma cor (magnitude), rótulo direto no fim
+  // Ranking — barras horizontais coloridas por severidade (tempo real, não ciclo cru),
+  // com opção de ocultar o maior valor pra não esmagar a escala dos demais
+  const rankData = ocultarMaior ? D.ranking.slice(1) : D.ranking;
   charts.rank = new Chart(document.getElementById('rank'), {
-    type:'bar',
-    data:{labels:D.ranking.map(r=>r.codigo),
-      datasets:[{data:D.ranking.map(r=>r.ciclos), backgroundColor:BLUE,
+    type:'bar', plugins:[rotuloBarraPlugin],
+    data:{labels:rankData.map(r=>r.codigo),
+      datasets:[{data:rankData.map(r=>r.ciclos), backgroundColor:rankData.map(r=>corSeveridade(r.ciclos)),
         borderRadius:4, borderSkipped:false, barThickness:'flex', maxBarThickness:26}]},
-    options:{indexAxis:'y', maintainAspectRatio:false,
+    options:{indexAxis:'y', maintainAspectRatio:false, layout:{padding:{right:70}},
       plugins:{legend:{display:false},
-        tooltip:{callbacks:{label:c=>` ${c.raw} ciclos (~${c.raw} min)`}}},
+        tooltip:{callbacks:{label:c=>` ${fmtMin(c.raw)} (${fmtNum(c.raw)} ciclos)`}}},
       scales:{x:{beginAtZero:true, grid, ticks:{color:MUTED}},
         y:{grid:{display:false}, ticks:{color:INK}}}}
   });
-  document.getElementById('wrapRank').style.height = Math.max(260, D.ranking.length*34+40)+'px';
+  document.getElementById('wrapRank').style.height = Math.max(260, rankData.length*34+40)+'px';
 
-  // Timeline — área, uma série (título já nomeia), com stepped pra ler ciclo a ciclo
-  charts.tl = new Chart(document.getElementById('tl'), {
-    type:'line',
-    data:{labels:D.timeline.map(p=>p.t.slice(11,16)),
-      datasets:[{data:D.timeline.map(p=>p.n), borderColor:BLUE,
-        backgroundColor:'rgba(42,120,214,.14)', fill:true, stepped:true,
-        borderWidth:2, pointRadius:0, pointHoverRadius:5}]},
+  // Timeline filtrada pelo período escolhido (Tudo/24h/7 dias/30 dias)
+  const tlD = filtrarTimelinePorPeriodo(D.timeline, periodoTl);
+  const picoLocal = tlD.reduce((m,p)=>Math.max(m,p.n), 0);
+  const picoIdx = picoLocal>0 ? tlD.findIndex(p=>p.n===picoLocal) : -1;
+
+  // Mini-cards de resumo (atual / pico / média), com indicador de cor e unidade
+  const tlAtual = tlD.length ? tlD[tlD.length-1].n : 0;
+  const tlMedia = tlD.length ? tlD.reduce((a,p)=>a+p.n,0)/tlD.length : 0;
+  const dot = cor=>`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${cor};margin-right:6px"></span>`;
+  document.getElementById('tlMiniCards').innerHTML = [
+    ['Atual', fmtNum(tlAtual), tlAtual>0?RED:PAL.green],
+    ['Pico máximo', fmtNum(picoLocal), RED],
+    ['Média', `${tlMedia.toFixed(1)} equip.`, BLUE],
+  ].map(([k,v,cor])=>`<div class="tlMiniCard"><div class="v">${dot(cor)}${v}</div><div class="k">${k}</div></div>`).join('');
+
+  // área com gradiente (em vez de bloco sólido), stepped pra ler ciclo a ciclo,
+  // ponto de pico destacado em vermelho com callout permanente de data/hora
+  const tlEl = document.getElementById('tl');
+  const gradTl = tlEl.getContext('2d').createLinearGradient(0, 0, 0, tlEl.clientHeight || 340);
+  gradTl.addColorStop(0, hexAlpha(BLUE,.30));
+  gradTl.addColorStop(1, hexAlpha(BLUE,0));
+  const tlEhPico = tlD.map((p,i)=>i===picoIdx);
+  charts.tl = new Chart(tlEl, {
+    type:'line', plugins:[picoCalloutPlugin],
+    data:{labels:tlD.map(p=>fmtEixoTl(p.t)),
+      datasets:[{data:tlD.map(p=>p.n), borderColor:BLUE,
+        backgroundColor:gradTl, fill:true, stepped:true, borderWidth:2,
+        pointRadius:tlEhPico.map(pico=>pico?5:0), pointHoverRadius:6,
+        pointBackgroundColor:tlEhPico.map(pico=>pico?RED:BLUE),
+        pointBorderColor:tlEhPico.map(pico=>pico?RED:BLUE)}]},
     options:{maintainAspectRatio:false, interaction:{mode:'index', intersect:false},
       plugins:{legend:{display:false},
+        picoCallout: picoIdx>=0 ? {indice:picoIdx, texto:`Pico: ${picoLocal} equip. em ${fmtEixoTl(tlD[picoIdx].t)}`} : null,
         tooltip:{callbacks:{
-          title:it=>D.timeline[it[0].dataIndex].t,
-          label:c=>{const p=D.timeline[c.dataIndex];
+          title:it=>tlD[it[0].dataIndex].t,
+          label:c=>{const p=tlD[c.dataIndex];
             return p.n?` ${p.n} offline: ${p.codigos.join(', ')}`:' tudo comunicando'}}}},
-      scales:{y:{beginAtZero:true, ticks:{precision:0, color:MUTED, stepSize:1}, grid},
+      scales:{y:{min:0, beginAtZero:true, max:picoLocal||undefined, ticks:{precision:0, color:MUTED, stepSize:1}, grid},
         x:{grid:{display:false}, ticks:{color:MUTED, maxTicksLimit:12, autoSkip:true}}}}
   });
 
@@ -646,18 +942,28 @@ function render(D){
         borderRadius:4, borderSkipped:false, maxBarThickness:60}]},
     options:{maintainAspectRatio:false,
       plugins:{legend:{display:false},
-        tooltip:{callbacks:{label:c=>` ${c.raw} ciclos`}}},
+        tooltip:{callbacks:{label:c=>` ${fmtNum(c.raw)} ciclos`}}},
       scales:{y:{beginAtZero:true, ticks:{precision:0, color:MUTED}, grid},
         x:{grid:{display:false}, ticks:{color:INK}}}}
   });
 
-  document.getElementById('tbody').innerHTML = D.ranking.map(r=>
-    `<tr><td>${r.codigo}</td><td>${r.ciclos}</td><td>${r.resets}</td>
-     <td>${r.primeiro||''}</td><td>${r.ultimo||''}</td></tr>`).join('');
+  renderTbody(D);
 }
 
 document.getElementById('chkSem16').addEventListener('change', e=>{
   render(e.target.checked ? PAYLOAD.filtrado : PAYLOAD.completo);
+});
+document.getElementById('chkOcultarMaior').addEventListener('change', e=>{
+  ocultarMaior = e.target.checked;
+  render(dadosAtual);
+});
+document.querySelectorAll('#periodoTl .chipBtn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('#periodoTl .chipBtn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    periodoTl = Number(btn.dataset.periodo);
+    render(dadosAtual);
+  });
 });
 render(PAYLOAD.completo);
 
@@ -672,6 +978,9 @@ document.querySelectorAll('.tabBtn').forEach(btn=>{
     document.getElementById('tabEquip').style.display = btn.dataset.tab==='equip' ? '' : 'none';
     document.getElementById('tabChips').style.display = btn.dataset.tab==='chips' ? '' : 'none';
     ativarTema(btn.dataset.tab);
+    // ponytail: gráficos criados com a aba escondida (display:none) ficam com canvas 0x0 e
+    // o Chart.js não redimensiona sozinho quando ela aparece - força um resize ao trocar de aba.
+    document.querySelectorAll('canvas').forEach(cv => Chart.getChart(cv)?.resize());
   });
 });
 ativarTema('equip');
@@ -683,7 +992,8 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
     {key:'cliente', label:'Cliente', type:'text'}, {key:'codigo', label:'Código', type:'text'},
     {key:'iccid', label:'ICCID', type:'text'}, {key:'telefone', label:'Telefone', type:'text'},
     {key:'cidade', label:'Cidade', type:'text'}, {key:'operadora', label:'Operadora', type:'text'},
-    {key:'ultimaComunicacao', label:'Última comunicação', type:'date'}, {key:'status', label:'Status', type:'text'},
+    {key:'ultimaComunicacao', label:'Última comunicação', type:'date'},
+    {key:'status', label:'Status', type:'text', fmt:x=>STATUS_LABEL[x.status]},
     {key:'franquiaMb', label:'Franquia', type:'num'}, {key:'consumidoMb', label:'Consumido', type:'num'},
     {key:'restanteMb', label:'Restante', type:'num'}, {key:'pct', label:'%', type:'num'},
   ];
@@ -712,16 +1022,16 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
   const operadoraCores = [PAL.blue,'#9ec5f4',PAL.green,PAL.amber,PAL.red,'#8a63d2'];
 
   let filtroStatus = '', filtroCliente = '', filtroOperadora = '', filtroCidade = '', filtroFaixa = null;
-  let sortCol = null, sortDir = 0;
   let ultimosFiltrados = [];
 
   const statusChart = new Chart(document.getElementById('chipsStatusChart'), {
-    type:'doughnut',
+    type:'doughnut', plugins:[centroRoscaPlugin],
     data:{labels:['Atualizado','Atrasado','Sem comunicação'],
       datasets:[{data:[C.totais.atualizados, C.totais.atrasados, C.totais.semComunicacao],
-        backgroundColor:[PAL.green, PAL.amber, PAL.red], borderWidth:0, hoverOffset:14}]},
+        backgroundColor:[PAL.green, PAL.amber, PAL.red], borderWidth:0, hoverOffset:8}]},
     options:{maintainAspectRatio:false, onHover:(e,els)=>{e.native.target.style.cursor=els.length?'pointer':'default'},
-      plugins:{legend:{position:'bottom', labels:{color:PAL.ink2, boxWidth:12}}},
+      plugins:{legend:{position:'bottom', labels:{color:'#E2E8F0', boxWidth:12, ...legendComContagem()}},
+        centroRosca:{valor:fmtNum(C.totais.chips), rotulo:'Chips Ativos'}},
       onClick:(e,els)=>{
         if(!els.length) return;
         const val = ['atualizado','atrasado','sem_comunicacao'][els[0].index];
@@ -731,14 +1041,37 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
       }}
   });
 
+  const rotuloClientePlugin = {
+    id: 'rotuloCliente',
+    afterDatasetsDraw(chart){
+      const {ctx} = chart;
+      ctx.save();
+      ctx.font = '11px system-ui,-apple-system,"Segoe UI",sans-serif';
+      ctx.fillStyle = '#E2E8F0';
+      ctx.textBaseline = 'middle';
+      chart.getDatasetMeta(0).data.forEach((bar,i)=>{
+        ctx.fillText(fmtNum(chart.data.datasets[0].data[i]), bar.x+6, bar.y);
+      });
+      ctx.restore();
+    }
+  };
   const clienteChart = new Chart(document.getElementById('chipsClienteChart'), {
-    type:'bar',
+    type:'bar', plugins:[rotuloClientePlugin],
     data:{labels:clientesOrd.map(c=>c[0]),
-      datasets:[{data:clientesOrd.map(c=>c[1]), backgroundColor:BLUE, hoverBackgroundColor:'#3B82F6', borderRadius:4, borderSkipped:false, maxBarThickness:26}]},
-    options:{indexAxis:'y', maintainAspectRatio:false, onHover:(e,els)=>{e.native.target.style.cursor=els.length?'pointer':'default'},
+      datasets:[{data:clientesOrd.map(c=>c[1]), backgroundColor:clientesOrd.map(()=>BLUE),
+        borderRadius:4, borderSkipped:false, maxBarThickness:26}]},
+    options:{indexAxis:'y', maintainAspectRatio:false, layout:{padding:{right:40}},
+      onHover:(e,els,chart)=>{
+        e.native.target.style.cursor = els.length?'pointer':'default';
+        chart.data.datasets[0].backgroundColor = clientesOrd.map((c,i)=>
+          !els.length || i===els[0].index ? BLUE : hexAlpha(BLUE,.35));
+        chart.update('none');
+      },
       plugins:{legend:{display:false}},
       scales:{x:{beginAtZero:true, ticks:{precision:0, color:PAL.muted}, grid:{color:PAL.grid}},
-        y:{grid:{display:false}, ticks:{color:PAL.ink}}},
+        y:{grid:{display:false}, afterFit:scale=>{ scale.width = 110; },
+          ticks:{color:PAL.ink,
+            callback:function(val){ const l=this.getLabelForValue(val); return l.length>14 ? l.slice(0,13)+'…' : l; }}}},
       onClick:(e,els)=>{
         if(!els.length) return;
         const val = clientesOrd[els[0].index][0];
@@ -749,11 +1082,12 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
   });
 
   const operadoraChart = new Chart(document.getElementById('chipsOperadoraChart'), {
-    type:'doughnut',
+    type:'doughnut', plugins:[centroRoscaPlugin],
     data:{labels:operadorasOrd.map(o=>o[0]),
-      datasets:[{data:operadorasOrd.map(o=>o[1]), backgroundColor:operadorasOrd.map((o,i)=>operadoraCores[i%operadoraCores.length]), borderWidth:0, hoverOffset:14}]},
+      datasets:[{data:operadorasOrd.map(o=>o[1]), backgroundColor:operadorasOrd.map((o,i)=>operadoraCores[i%operadoraCores.length]), borderWidth:0, hoverOffset:8}]},
     options:{maintainAspectRatio:false, onHover:(e,els)=>{e.native.target.style.cursor=els.length?'pointer':'default'},
-      plugins:{legend:{position:'bottom', labels:{color:PAL.ink2, boxWidth:12}}},
+      plugins:{legend:{position:'bottom', labels:{color:'#E2E8F0', boxWidth:12, ...legendComContagem()}},
+        centroRosca:{valor:fmtNum(C.lista.length), rotulo:'Chips'}},
       onClick:(e,els)=>{
         if(!els.length) return;
         const val = operadorasOrd[els[0].index][0];
@@ -764,11 +1098,12 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
   });
 
   const consumoChart = new Chart(document.getElementById('chipsConsumoChart'), {
-    type:'doughnut',
+    type:'doughnut', plugins:[centroRoscaPlugin],
     data:{labels:faixas.map(f=>f.label), datasets:[{data:faixas.map(f=>C.lista.filter(x=>x.pct>=f.min && x.pct<f.max).length),
-      backgroundColor:faixas.map(f=>f.cor), borderWidth:0, hoverOffset:14}]},
+      backgroundColor:faixas.map(f=>f.cor), borderWidth:0, hoverOffset:8}]},
     options:{maintainAspectRatio:false, onHover:(e,els)=>{e.native.target.style.cursor=els.length?'pointer':'default'},
-      plugins:{legend:{position:'bottom', labels:{color:PAL.ink2, boxWidth:12}}},
+      plugins:{legend:{position:'bottom', labels:{color:'#E2E8F0', boxWidth:12, ...legendComContagem()}},
+        centroRosca:{valor:fmtNum(C.lista.length), rotulo:'Chips'}},
       onClick:(e,els)=>{
         if(!els.length) return;
         const f = faixas[els[0].index];
@@ -868,56 +1203,21 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
     if (menu.style.display==='block' && !menu.contains(e.target) && e.target.id!=='btnColunas') menu.style.display='none';
   });
 
-  // --- Exportar CSV (dos dados filtrados/ordenados na tela) ---
-  document.getElementById('btnExportar').addEventListener('click', ()=>{
-    const linhas = [COLS.map(c=>c.label).join(';')].concat(ultimosFiltrados.map(x=>
-      COLS.map(c=>{
-        let v = c.key==='status' ? STATUS_LABEL[x.status] : x[c.key];
-        return `"${(v??'').toString().replace(/"/g,'""')}"`;
-      }).join(';')));
-    const blob = new Blob(['﻿'+linhas.join('\n')], {type:'text/csv;charset=utf-8;'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'chips_consumo.csv'; a.click();
-    URL.revokeObjectURL(url);
-  });
+  // --- Exportar CSV/XLSX (dos dados filtrados/ordenados na tela) ---
+  document.getElementById('btnExportarCsv').addEventListener('click', ()=> exportarTabela('chips_consumo', COLS, ultimosFiltrados, 'csv'));
+  document.getElementById('btnExportarXlsx').addEventListener('click', ()=> exportarTabela('chips_consumo', COLS, ultimosFiltrados, 'xlsx'));
 
   // --- Ordenação tri-estado nos cabeçalhos ---
-  function ordenar(lista){
-    if (!sortCol || sortDir===0) return lista;
-    const tipo = COLS.find(c=>c.key===sortCol).type;
-    return [...lista].sort((a,b)=>{
-      let va=a[sortCol], vb=b[sortCol];
-      const aNull = va===null||va===undefined||va==='', bNull = vb===null||vb===undefined||vb==='';
-      if (aNull && bNull) return 0;
-      if (aNull) return 1;
-      if (bNull) return -1;
-      if (tipo==='num'){ va=Number(va); vb=Number(vb); }
-      else if (tipo==='date'){ va=new Date(va).getTime(); vb=new Date(vb).getTime(); }
-      else { va=String(va).toLowerCase(); vb=String(vb).toLowerCase(); }
-      if (va<vb) return sortDir===1?-1:1;
-      if (va>vb) return sortDir===1?1:-1;
-      return 0;
-    });
-  }
-  document.querySelectorAll('#tabelaChips th[data-col]').forEach(th=>{
-    th.addEventListener('click', ()=>{
-      const col = th.dataset.col;
-      if (sortCol !== col) { sortCol = col; sortDir = 1; }
-      else { sortDir = sortDir===1?2:(sortDir===2?0:1); if (sortDir===0) sortCol=null; }
-      document.querySelectorAll('#tabelaChips th[data-col]').forEach(h=>h.classList.remove('sortAsc','sortDesc'));
-      if (sortCol) th.classList.add(sortDir===1?'sortAsc':'sortDesc');
-      aplicarFiltrosChips();
-    });
-  });
+  const ordenar = criarOrdenacao('tabelaChips', COLS, aplicarFiltrosChips);
 
   // --- Linha da tabela + ações ---
+  const vazio = '<span class="vazio">—</span>';
   function linhaHtml(x){
-    return `<tr class="${x.critico?'linhaCritica':''}">
-      <td>${x.cliente||''}</td><td>${x.codigo}</td><td>${x.iccid||''}</td><td>${x.telefone||''}</td>
-      <td>${x.cidade||''}</td><td>${x.operadora||''}</td>
-      <td>${x.ultimaComunicacao ? x.ultimaComunicacao.slice(0,16).replace('T',' ') : ''}</td>
-      <td><span class="badge ${x.status}"><span class="dot"></span>${STATUS_LABEL[x.status]}</span></td>
+    return `<tr>
+      <td>${x.cliente||vazio}</td><td>${x.codigo}</td><td class="mono" style="font-size:11.5px">${x.iccid||vazio}</td><td>${x.telefone||vazio}</td>
+      <td>${x.cidade||vazio}</td><td>${x.operadora||vazio}</td>
+      <td>${x.ultimaComunicacao ? x.ultimaComunicacao.slice(0,16).replace('T',' ') : vazio}</td>
+      <td><span class="badge ${x.status}"><span class="dot"></span>${STATUS_LABEL[x.status]}</span>${x.critico?' <span class="badge sem_comunicacao"><span class="dot"></span>CRÍTICO</span>':''}</td>
       <td>${x.franquiaMb} MB</td><td>${x.consumidoMb} MB</td><td>${x.restanteMb} MB</td><td>${x.pct}%</td>
       <td><details class="rowMenu"><summary>⋯</summary><div class="menu">
         <button data-acao="copiar" data-iccid="${x.iccid}">Copiar ICCID</button>
@@ -1041,6 +1341,21 @@ def _check():
     assert d["totais"]["pico"] == 2                  # 2 offline ao mesmo tempo
     assert [p["n"] for p in d["timeline"]] == [2, 1, 0]  # inclui o ciclo vazio
     assert d["ranking"][0]["codigo"] == "EQP-01" and d["ranking"][0]["ciclos"] == 2
+
+    # ponytail: cruza mês pra pegar regressão de comparar "registrada" como string
+    # ("01-08" < "31-07" como texto, mesmo Ago vindo depois de Jul) - bug real, corrigido.
+    linhas_mes = [
+        ("EQP-09", "31-07-2026 23:57:52", "nao"),
+        ("EQP-09", "01-08-2026 00:01:38", "nao"),
+    ]
+    d2 = agregar(linhas_mes, set())
+    r = d2["ranking"][0]
+    assert r["primeiro"] == "31-07-2026 23:57:52", r
+    assert r["ultimo"] == "01-08-2026 00:01:38", r
+
+    assert fmt_horas(208.2) == "8d 16h 12m", fmt_horas(208.2)
+    assert fmt_horas(88.0) == "3d 16h", fmt_horas(88.0)
+    assert fmt_horas(16.2) == "16h 12m", fmt_horas(16.2)
 
     base = datetime(2026, 1, 1)
     ts = [base, base + timedelta(minutes=1), base + timedelta(minutes=2),
