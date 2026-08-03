@@ -1,0 +1,6 @@
+.env
+__pycache__/
+*.pyc
+/index.html
+/registro_offline_view.xlsx
+/monitor_fundo.log
