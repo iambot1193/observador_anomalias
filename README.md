@@ -29,17 +29,19 @@ visualizar o layout e as interações.
 - Tabela com ciclos offline e resets enviados por equipamento
 
 **Aba de chips** (tema *dark glassmorphism*):
-- 4 KPIs no topo: chips ativos, consumo do mês (GB), chips críticos (sem comunicação
-  há mais de 48h), % de franquia consumida
-- 4 gráficos lado a lado, **clicáveis** — clicar numa fatia/barra filtra a tabela
-  inteira (status de conexão, cliente, operadora, faixa de consumo). Clicar de novo
-  remove o filtro.
+- 4 KPIs no topo (chips ativos, consumo do mês, críticos, % de franquia consumida) —
+  puramente informativos, sem hover/clique
+- 4 gráficos lado a lado com **cross-filtering reativo**: clicar numa fatia/barra
+  (status de conexão, cliente, operadora ou faixa de consumo) recalcula os outros 3
+  gráficos e a tabela na hora, considerando os filtros combinados. Clicar de novo
+  remove aquele filtro.
 - Barra de filtros ativos com botão para remover individualmente ou limpar tudo
-- Busca por texto + seletores de cliente/operadora
-- Chips de status rápido (Todos / Atualizados / Atrasados / Sem comunicação)
-- Tabela com cabeçalho fixo (sticky) ao rolar, ordenação tri-estado em qualquer coluna
-  (ascendente → descendente → neutro, nulos sempre por último)
-- Seletor de colunas (exibir/ocultar)
+- Busca por texto + seletores de cliente / operadora / cidade
+- Chips de status rápido (Todos / Atualizados / Atrasados / Sem comunicação), contagem
+  reativa aos outros filtros
+- Tabela com cabeçalho fixo (sticky) ao rolar, scrollbar customizada, ordenação
+  tri-estado em qualquer coluna (ascendente → descendente → neutro, nulos por último)
+- Seletor de colunas (exibir/ocultar) com atalho "Marcar todos / Desmarcar todos"
 - Exportar CSV dos dados filtrados na tela
 - Ação rápida por linha: copiar ICCID, ver detalhes completos do chip
 - Linhas de chips críticos destacadas visualmente

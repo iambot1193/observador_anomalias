@@ -8,13 +8,21 @@
 <style>
   :root{ --border:rgba(255,255,255,.10) }
   *{box-sizing:border-box}
+  button{font:inherit;appearance:none;-webkit-appearance:none;-moz-appearance:none}
+  html{scrollbar-width:thin;scrollbar-color:#2A2E3F #13151E}
+  ::-webkit-scrollbar{width:8px;height:8px}
+  ::-webkit-scrollbar-track{background:#13151E}
+  ::-webkit-scrollbar-thumb{background:#2A2E3F;border-radius:9999px;border:2px solid transparent;background-clip:padding-box}
+  ::-webkit-scrollbar-thumb:hover{background:#3B82F6}
+  ::-webkit-scrollbar-corner{background:#13151E}
   body{margin:0;background:#05060A;color:#F5F6FA;
     font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.45}
   .wrap{max-width:1100px;margin:0 auto;padding:28px 20px 60px}
   h1{font-size:22px;margin:0 0 2px}
   .sub{font-size:13px;margin:0 0 20px;opacity:.65}
-  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:26px}
-  .tile{border-radius:12px;padding:14px 16px}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0;margin-bottom:26px}
+  .tile{padding:4px 20px;cursor:default}
+  .tile:not(:first-child){border-left:1px solid rgba(255,255,255,.10)}
   .tile .v{font-size:28px;font-weight:700;letter-spacing:-.5px}
   .tile .k{font-size:12px;opacity:.65;margin-top:2px}
   .card{border-radius:14px;padding:18px 18px 8px;margin-bottom:22px}
@@ -25,7 +33,7 @@
   table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
   th,td{text-align:right;padding:8px 10px;border-bottom:1px solid var(--border)}
   th:first-child,td:first-child{text-align:left;font-variant-numeric:normal}
-  th{font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px;opacity:.55}
+  th{font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:rgba(245,246,250,.55)}
   details summary{cursor:pointer;font-size:13px;margin-top:4px;opacity:.7}
   .chk{display:inline-flex;align-items:center;gap:8px;font-size:14px;opacity:.75;
     margin:-8px 0 22px;cursor:pointer}
@@ -37,13 +45,15 @@
 
   /* Dark Glassmorphism — mesmo tema nas duas abas (cobre a área toda) */
   body.theme-equip,body.theme-chips{background:linear-gradient(160deg, #171233 0%, #0D0F18 45%, #05060A 100%) fixed}
-  #tabEquip .card,#tabEquip .tile,#tabChips .card,#tabChips .tile{
+  #tabEquip .card,#tabChips .card{
     background:rgba(255,255,255,.04);backdrop-filter:blur(16px);
     -webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.09)}
   #tabEquip .tile.alerta .v,#tabChips .tile.alerta .v{color:#FF4D4D}
   #tabChips .tile.ok .v{color:#00E676}
 
   .biRow4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+  .biRow4 .chart{transition:transform .15s ease,box-shadow .15s ease;border-radius:10px}
+  .biRow4 .chart:hover{transform:scale(1.03);box-shadow:0 8px 24px rgba(37,99,235,.22)}
   @media (max-width:980px){.biRow4{grid-template-columns:1fr 1fr}}
   @media (max-width:560px){.biRow4{grid-template-columns:1fr}}
 
@@ -51,11 +61,16 @@
   .filtros input,.filtros select{padding:9px 12px;border-radius:8px;border:1px solid var(--border);
     background:rgba(255,255,255,.05);color:inherit;font-size:13px}
   .filtros input{flex:1;min-width:220px}
-  .statusChips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
-  .chipBtn{padding:6px 14px;border-radius:20px;border:1px solid var(--border);background:rgba(255,255,255,.05);
-    color:inherit;opacity:.65;font-size:12.5px;cursor:pointer}
-  .chipBtn.active{opacity:1;border-color:#2563EB}
-  .chipBtn b{margin-left:4px}
+  .filtros select option{background:#13151E;color:#F1F5F9}
+  .filtros select option:hover,.filtros select option:checked,.filtros select option:focus{background:#2563EB;color:#fff}
+  .statusChips{display:flex;gap:20px;flex-wrap:wrap;margin-bottom:14px;border-bottom:1px solid var(--border)}
+  .chipBtn{padding:8px 14px;border:none;border-radius:8px;background:none;
+    color:inherit;opacity:.6;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+    transition:opacity .15s,background-color .15s}
+  .chipBtn:hover{opacity:.9;background:rgba(255,255,255,.06)}
+  .chipBtn.active{opacity:1;background:rgba(37,99,235,.18);color:#60A5FA;font-weight:600}
+  .chipBtn b{margin-left:0;background:rgba(255,255,255,.08);padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600}
+  .chipBtn.active b{background:rgba(37,99,235,.3);color:#93C5FD}
 
   .filtrosAtivos{display:none;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
   .filtroBadge{background:rgba(37,99,235,.18);border:1px solid rgba(37,99,235,.4);border-radius:20px;
@@ -82,13 +97,20 @@
     border:1px solid var(--border);border-radius:10px;padding:10px 14px;min-width:210px;
     box-shadow:0 10px 30px rgba(0,0,0,.4)}
   .colunasMenu label{display:flex;gap:8px;align-items:center;font-size:12.5px;padding:4px 0;cursor:pointer}
+  .colunasAcoes{display:flex;gap:8px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+  .colunasAcoes button{flex:1;background:rgba(255,255,255,.05);border:1px solid var(--border);color:inherit;
+    border-radius:6px;padding:5px 0;font-size:11.5px;cursor:pointer}
+  .colunasAcoes button:hover{background:rgba(37,99,235,.18)}
 
-  .tableWrap{margin-left:20px;background:#12141c;border:1px solid rgba(255,255,255,.09);
-    border-radius:14px;max-height:640px;overflow:auto;padding:0}
-  .tableWrap table{margin:0}
-  .tableWrap td,.tableWrap th{padding:9px 10px 9px 14px}
-  .tableWrap th{position:sticky;top:0;background:#12141c;cursor:pointer;user-select:none;z-index:5}
-  .tableWrap th[data-col]:hover{opacity:.85}
+  .tableWrap{position:relative;width:calc(100% + 100px);margin-left:-50px;margin-right:-50px;
+    background:#12141c;border:1px solid rgba(255,255,255,.09);
+    border-radius:14px;max-height:640px;overflow-y:auto;overflow-x:auto;padding:0}
+  .tableWrap table{margin:0;border-collapse:separate;border-spacing:0}
+  .tableWrap td,.tableWrap th{padding:12px 16px;white-space:nowrap}
+  .tableWrap th{position:sticky !important;top:0 !important;background-color:#13151E !important;
+    background-clip:padding-box;cursor:pointer;user-select:none;z-index:100 !important;
+    box-shadow:0 2px 5px rgba(0,0,0,.5)}
+  .tableWrap th[data-col]:hover{color:rgba(245,246,250,.85)}
   .tableWrap th[data-col]::after{content:'⇅';margin-left:5px;opacity:.3;font-size:10px}
   .tableWrap th.sortAsc::after{content:'▲';opacity:1;color:#2563EB}
   .tableWrap th.sortDesc::after{content:'▼';opacity:1;color:#2563EB}
@@ -152,8 +174,10 @@
 
     <details open>
       <summary>Ver tabela</summary>
-      <table><thead><tr><th>Código</th><th>Ciclos offline</th><th>Resets enviados</th>
-        <th>Primeiro</th><th>Último</th></tr></thead><tbody id="tbody"></tbody></table>
+      <div class="tableWrap" style="max-height:480px">
+        <table><thead><tr><th>Código</th><th>Ciclos offline</th><th>Resets enviados</th>
+          <th>Primeiro</th><th>Último</th></tr></thead><tbody id="tbody"></tbody></table>
+      </div>
     </details>
   </div>
 
@@ -191,6 +215,7 @@
       <input id="fBusca" type="text" placeholder="Buscar por código, ICCID, telefone, cliente ou cidade...">
       <select id="fCliente"><option value="">Todos os clientes</option></select>
       <select id="fOperadora"><option value="">Todas as operadoras</option></select>
+      <select id="fCidade"><option value="">Todas as cidades</option></select>
     </div>
     <div class="statusChips" id="statusChips">
       <button class="chipBtn active" data-status="">Todos <b id="cntTodos">0</b></button>
@@ -372,7 +397,7 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
   ];
   const operadoraCores = [PAL.blue,'#9ec5f4',PAL.green,PAL.amber,PAL.red,'#8a63d2'];
 
-  let filtroStatus = '', filtroCliente = '', filtroOperadora = '', filtroFaixa = null;
+  let filtroStatus = '', filtroCliente = '', filtroOperadora = '', filtroCidade = '', filtroFaixa = null;
   let sortCol = null, sortDir = 0;
   let ultimosFiltrados = [];
 
@@ -380,7 +405,7 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
     type:'doughnut',
     data:{labels:['Atualizado','Atrasado','Sem comunicação'],
       datasets:[{data:[C.totais.atualizados, C.totais.atrasados, C.totais.semComunicacao],
-        backgroundColor:[PAL.green, PAL.amber, PAL.red], borderWidth:0}]},
+        backgroundColor:[PAL.green, PAL.amber, PAL.red], borderWidth:0, hoverOffset:14}]},
     options:{maintainAspectRatio:false, onHover:(e,els)=>{e.native.target.style.cursor=els.length?'pointer':'default'},
       plugins:{legend:{position:'bottom', labels:{color:PAL.ink2, boxWidth:12}}},
       onClick:(e,els)=>{
@@ -388,14 +413,14 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
         const val = ['atualizado','atrasado','sem_comunicacao'][els[0].index];
         filtroStatus = filtroStatus===val ? '' : val;
         document.querySelectorAll('#statusChips .chipBtn').forEach(b=>b.classList.toggle('active', b.dataset.status===filtroStatus));
-        atualizarSelecaoGraficos(); aplicarFiltrosChips();
+        recalcularGraficos(); aplicarFiltrosChips();
       }}
   });
 
   const clienteChart = new Chart(document.getElementById('chipsClienteChart'), {
     type:'bar',
     data:{labels:clientesOrd.map(c=>c[0]),
-      datasets:[{data:clientesOrd.map(c=>c[1]), backgroundColor:BLUE, borderRadius:4, borderSkipped:false, maxBarThickness:26}]},
+      datasets:[{data:clientesOrd.map(c=>c[1]), backgroundColor:BLUE, hoverBackgroundColor:'#3B82F6', borderRadius:4, borderSkipped:false, maxBarThickness:26}]},
     options:{indexAxis:'y', maintainAspectRatio:false, onHover:(e,els)=>{e.native.target.style.cursor=els.length?'pointer':'default'},
       plugins:{legend:{display:false}},
       scales:{x:{beginAtZero:true, ticks:{precision:0, color:PAL.muted}, grid:{color:PAL.grid}},
@@ -405,14 +430,14 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
         const val = clientesOrd[els[0].index][0];
         filtroCliente = filtroCliente===val ? '' : val;
         document.getElementById('fCliente').value = filtroCliente;
-        atualizarSelecaoGraficos(); aplicarFiltrosChips();
+        recalcularGraficos(); aplicarFiltrosChips();
       }}
   });
 
   const operadoraChart = new Chart(document.getElementById('chipsOperadoraChart'), {
     type:'doughnut',
     data:{labels:operadorasOrd.map(o=>o[0]),
-      datasets:[{data:operadorasOrd.map(o=>o[1]), backgroundColor:operadorasOrd.map((o,i)=>operadoraCores[i%operadoraCores.length]), borderWidth:0}]},
+      datasets:[{data:operadorasOrd.map(o=>o[1]), backgroundColor:operadorasOrd.map((o,i)=>operadoraCores[i%operadoraCores.length]), borderWidth:0, hoverOffset:14}]},
     options:{maintainAspectRatio:false, onHover:(e,els)=>{e.native.target.style.cursor=els.length?'pointer':'default'},
       plugins:{legend:{position:'bottom', labels:{color:PAL.ink2, boxWidth:12}}},
       onClick:(e,els)=>{
@@ -420,40 +445,73 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
         const val = operadorasOrd[els[0].index][0];
         filtroOperadora = filtroOperadora===val ? '' : val;
         document.getElementById('fOperadora').value = filtroOperadora;
-        atualizarSelecaoGraficos(); aplicarFiltrosChips();
+        recalcularGraficos(); aplicarFiltrosChips();
       }}
   });
 
   const consumoChart = new Chart(document.getElementById('chipsConsumoChart'), {
     type:'doughnut',
     data:{labels:faixas.map(f=>f.label), datasets:[{data:faixas.map(f=>C.lista.filter(x=>x.pct>=f.min && x.pct<f.max).length),
-      backgroundColor:faixas.map(f=>f.cor), borderWidth:0}]},
+      backgroundColor:faixas.map(f=>f.cor), borderWidth:0, hoverOffset:14}]},
     options:{maintainAspectRatio:false, onHover:(e,els)=>{e.native.target.style.cursor=els.length?'pointer':'default'},
       plugins:{legend:{position:'bottom', labels:{color:PAL.ink2, boxWidth:12}}},
       onClick:(e,els)=>{
         if(!els.length) return;
         const f = faixas[els[0].index];
         filtroFaixa = (filtroFaixa && filtroFaixa.label===f.label) ? null : f;
-        atualizarSelecaoGraficos(); aplicarFiltrosChips();
+        recalcularGraficos(); aplicarFiltrosChips();
       }}
   });
 
-  function atualizarSelecaoGraficos(){
+  // --- Cross-filtering: cada gráfico recalcula sua própria dimensão ignorando o filtro
+  // que ele mesmo controla, mas respeitando os demais (padrão dc.js/crossfilter). ---
+  function filtrarExceto(excluir){
+    const busca = document.getElementById('fBusca').value.trim().toLowerCase();
+    return C.lista.filter(x=>{
+      if (excluir!=='status' && filtroStatus && x.status !== filtroStatus) return false;
+      if (excluir!=='cliente' && filtroCliente && x.cliente !== filtroCliente) return false;
+      if (excluir!=='operadora' && filtroOperadora && x.operadora !== filtroOperadora) return false;
+      if (excluir!=='cidade' && filtroCidade && x.cidade !== filtroCidade) return false;
+      if (excluir!=='faixa' && filtroFaixa && !(x.pct>=filtroFaixa.min && x.pct<filtroFaixa.max)) return false;
+      if (busca && !`${x.codigo} ${x.iccid} ${x.telefone} ${x.cliente} ${x.cidade}`.toLowerCase().includes(busca)) return false;
+      return true;
+    });
+  }
+  function contarPor(lista, campo){
+    const m = {}; lista.forEach(x=>{ const k=x[campo]||'—'; m[k]=(m[k]||0)+1; }); return m;
+  }
+  function recalcularGraficos(){
+    const porStatusF = contarPor(filtrarExceto('status'), 'status');
+    statusChart.data.datasets[0].data = ['atualizado','atrasado','sem_comunicacao'].map(k=>porStatusF[k]||0);
     statusChart.data.datasets[0].backgroundColor = [
       ['atualizado',PAL.green],['atrasado',PAL.amber],['sem_comunicacao',PAL.red],
     ].map(([v,cor])=> (!filtroStatus||filtroStatus===v) ? cor : hexAlpha(cor,.25));
     statusChart.update();
+
+    const porClienteF = contarPor(filtrarExceto('cliente'), 'cliente');
+    clienteChart.data.datasets[0].data = clientesOrd.map(c=>porClienteF[c[0]]||0);
     clienteChart.data.datasets[0].backgroundColor = clientesOrd.map(c=>
       (!filtroCliente||filtroCliente===c[0]) ? BLUE : hexAlpha(BLUE,.25));
     clienteChart.update();
+
+    const porOperadoraF = contarPor(filtrarExceto('operadora'), 'operadora');
+    operadoraChart.data.datasets[0].data = operadorasOrd.map(o=>porOperadoraF[o[0]]||0);
     operadoraChart.data.datasets[0].backgroundColor = operadorasOrd.map((o,i)=>{
       const cor = operadoraCores[i%operadoraCores.length];
       return (!filtroOperadora||filtroOperadora===o[0]) ? cor : hexAlpha(cor,.25);
     });
     operadoraChart.update();
+
+    const listaFaixaF = filtrarExceto('faixa');
+    consumoChart.data.datasets[0].data = faixas.map(f=>listaFaixaF.filter(x=>x.pct>=f.min && x.pct<f.max).length);
     consumoChart.data.datasets[0].backgroundColor = faixas.map(f=>
       (!filtroFaixa||filtroFaixa.label===f.label) ? f.cor : hexAlpha(f.cor,.25));
     consumoChart.update();
+
+    document.getElementById('cntTodos').textContent = filtrarExceto('status').length;
+    document.getElementById('cntAtualizado').textContent = porStatusF.atualizado||0;
+    document.getElementById('cntAtrasado').textContent = porStatusF.atrasado||0;
+    document.getElementById('cntSemComunicacao').textContent = porStatusF.sem_comunicacao||0;
   }
 
   // --- Filtros de texto/select ---
@@ -461,19 +519,30 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
   document.getElementById('fCliente').innerHTML += clientesUnicos.map(c=>`<option value="${c}">${c}</option>`).join('');
   const operadorasUnicas = [...new Set(C.lista.map(x=>x.operadora).filter(Boolean))].sort();
   document.getElementById('fOperadora').innerHTML += operadorasUnicas.map(o=>`<option value="${o}">${o}</option>`).join('');
-  document.getElementById('cntTodos').textContent = C.lista.length;
-  document.getElementById('cntAtualizado').textContent = C.totais.atualizados;
-  document.getElementById('cntAtrasado').textContent = C.totais.atrasados;
-  document.getElementById('cntSemComunicacao').textContent = C.totais.semComunicacao;
+  const cidadesUnicas = [...new Set(C.lista.map(x=>x.cidade).filter(Boolean))].sort();
+  document.getElementById('fCidade').innerHTML += cidadesUnicas.map(c=>`<option value="${c}">${c}</option>`).join('');
 
   // --- Colunas exibir/ocultar ---
-  document.getElementById('colunasMenu').innerHTML = COLS.map((c,i)=>
-    `<label><input type="checkbox" checked data-idx="${i+1}"> ${c.label}</label>`).join('');
+  document.getElementById('colunasMenu').innerHTML =
+    `<div class="colunasAcoes">
+      <button type="button" data-acao="marcar">Marcar todos</button>
+      <button type="button" data-acao="desmarcar">Desmarcar todos</button>
+    </div>` +
+    COLS.map((c,i)=>`<label><input type="checkbox" checked data-idx="${i+1}"> ${c.label}</label>`).join('');
+  function aplicarColuna(chk){
+    const idx = chk.dataset.idx, hidden = !chk.checked;
+    document.querySelectorAll(`#tabelaChips th:nth-child(${idx}), #tabelaChips td:nth-child(${idx})`)
+      .forEach(el=>el.style.display = hidden ? 'none' : '');
+  }
   document.querySelectorAll('#colunasMenu input').forEach(chk=>{
-    chk.addEventListener('change', ()=>{
-      const idx = chk.dataset.idx, hidden = !chk.checked;
-      document.querySelectorAll(`#tabelaChips th:nth-child(${idx}), #tabelaChips td:nth-child(${idx})`)
-        .forEach(el=>el.style.display = hidden ? 'none' : '');
+    chk.addEventListener('change', ()=>aplicarColuna(chk));
+  });
+  document.querySelectorAll('#colunasMenu .colunasAcoes button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const marcar = btn.dataset.acao === 'marcar';
+      document.querySelectorAll('#colunasMenu input[type=checkbox]').forEach(chk=>{
+        chk.checked = marcar; aplicarColuna(chk);
+      });
     });
   });
   document.getElementById('btnColunas').addEventListener('click', ()=>{
@@ -578,6 +647,7 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
     const badges = [];
     if (filtroCliente) badges.push(['Cliente', filtroCliente, ()=>{filtroCliente='';document.getElementById('fCliente').value='';}]);
     if (filtroOperadora) badges.push(['Operadora', filtroOperadora, ()=>{filtroOperadora='';document.getElementById('fOperadora').value='';}]);
+    if (filtroCidade) badges.push(['Cidade', filtroCidade, ()=>{filtroCidade='';document.getElementById('fCidade').value='';}]);
     if (filtroStatus) badges.push(['Status', STATUS_LABEL[filtroStatus], ()=>{
       filtroStatus=''; document.querySelectorAll('#statusChips .chipBtn').forEach(b=>b.classList.toggle('active', b.dataset.status===''));
     }]);
@@ -589,14 +659,14 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
       + `<button id="btnLimparFiltros">Limpar todos os filtros</button>`;
     badges.forEach(([k,v,fn],i)=>{
       cont.querySelector(`.filtroBadge[data-i="${i}"]`).addEventListener('click', ()=>{
-        fn(); atualizarSelecaoGraficos(); aplicarFiltrosChips();
+        fn(); recalcularGraficos(); aplicarFiltrosChips();
       });
     });
     document.getElementById('btnLimparFiltros').addEventListener('click', ()=>{
-      filtroStatus=''; filtroCliente=''; filtroOperadora=''; filtroFaixa=null;
-      document.getElementById('fCliente').value=''; document.getElementById('fOperadora').value=''; document.getElementById('fBusca').value='';
+      filtroStatus=''; filtroCliente=''; filtroOperadora=''; filtroCidade=''; filtroFaixa=null;
+      document.getElementById('fCliente').value=''; document.getElementById('fOperadora').value=''; document.getElementById('fCidade').value=''; document.getElementById('fBusca').value='';
       document.querySelectorAll('#statusChips .chipBtn').forEach(b=>b.classList.toggle('active', b.dataset.status===''));
-      atualizarSelecaoGraficos(); aplicarFiltrosChips();
+      recalcularGraficos(); aplicarFiltrosChips();
     });
   }
 
@@ -607,6 +677,7 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
       if (filtroStatus && x.status !== filtroStatus) return false;
       if (filtroCliente && x.cliente !== filtroCliente) return false;
       if (filtroOperadora && x.operadora !== filtroOperadora) return false;
+      if (filtroCidade && x.cidade !== filtroCidade) return false;
       if (filtroFaixa && !(x.pct>=filtroFaixa.min && x.pct<filtroFaixa.max)) return false;
       if (busca && !`${x.codigo} ${x.iccid} ${x.telefone} ${x.cliente} ${x.cidade}`.toLowerCase().includes(busca)) return false;
       return true;
@@ -618,18 +689,20 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
       : `<tr><td colspan="13" style="text-align:center;padding:24px;opacity:.6">Nenhum chip encontrado.</td></tr>`;
     renderBadges();
   }
-  document.getElementById('fBusca').addEventListener('input', aplicarFiltrosChips);
-  document.getElementById('fCliente').addEventListener('change', e=>{ filtroCliente=e.target.value; atualizarSelecaoGraficos(); aplicarFiltrosChips(); });
-  document.getElementById('fOperadora').addEventListener('change', e=>{ filtroOperadora=e.target.value; atualizarSelecaoGraficos(); aplicarFiltrosChips(); });
+  document.getElementById('fBusca').addEventListener('input', ()=>{ recalcularGraficos(); aplicarFiltrosChips(); });
+  document.getElementById('fCliente').addEventListener('change', e=>{ filtroCliente=e.target.value; recalcularGraficos(); aplicarFiltrosChips(); });
+  document.getElementById('fOperadora').addEventListener('change', e=>{ filtroOperadora=e.target.value; recalcularGraficos(); aplicarFiltrosChips(); });
+  document.getElementById('fCidade').addEventListener('change', e=>{ filtroCidade=e.target.value; recalcularGraficos(); aplicarFiltrosChips(); });
   document.querySelectorAll('#statusChips .chipBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       document.querySelectorAll('#statusChips .chipBtn').forEach(b=>b.classList.remove('active'));
       btn.classList.add('active');
       filtroStatus = btn.dataset.status;
-      atualizarSelecaoGraficos();
+      recalcularGraficos();
       aplicarFiltrosChips();
     });
   });
+  recalcularGraficos();
   aplicarFiltrosChips();
 } else if (PAYLOAD.chips && PAYLOAD.chips.erro) {
   document.getElementById('chipsErro').style.display = '';
