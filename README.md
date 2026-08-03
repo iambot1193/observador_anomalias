@@ -22,7 +22,7 @@ visualizar o layout e as interações.
 
 ## Funcionalidades
 
-**Aba de equipamentos** (tema *dark tech*, inspirado em Linear/Vercel):
+**Aba de equipamentos** (tema *dark glassmorphism*, igual à aba de chips):
 - Ranking de equipamentos por tempo offline
 - Linha do tempo de quantos ficaram offline simultaneamente
 - Distribuição da simultaneidade
@@ -75,6 +75,19 @@ Login (`POST /authorization/api/v1/auth/login`, senha em base64) → token Beare
 `GET /simcard/connection/v1/connections` (paginado) traz, por chip: status de conexão,
 franquia contratada, bytes consumidos no ciclo, cliente final, cidade, operadora e
 timestamp da última comunicação. O script pagina até a API retornar uma página vazia.
+
+**Cache de token** (`.token_cache.json`, gitignored): o script só faz login de novo
+quando o token salvo expira. Se ainda tem refresh token válido, usa `refresh_token` em
+vez de logar com usuário/senha de novo. Se o servidor revogar o token antes da hora
+(a API responde 401/403), o script detecta e força um login novo automaticamente.
+Isso evita bater no endpoint de login toda vez que o dashboard é gerado — importante
+se você for rodar isso em intervalos curtos (cron, agendador).
+
+**Histórico** (`chips_historico.jsonl`, gitignored): a cada execução, grava uma linha
+por chip (timestamp, ICCID, status, % consumido) nesse arquivo append-only. Serve de
+base pra qualquer análise de tendência ou alerta futuro ("esse chip está sem
+comunicação há quantas execuções?") — o dashboard atual só mostra o snapshot mais
+recente, não lê esse histórico ainda.
 
 ## Stack
 

@@ -13,6 +13,7 @@ import base64
 import json
 import os
 import re
+import time
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
@@ -24,6 +25,8 @@ XLSX = os.path.join(AQUI, "registro_offline_view.xlsx")
 LOG = os.path.join(AQUI, "monitor_fundo.log")
 SAIDA = os.path.join(AQUI, "index.html")
 ENV_CHIPS = os.path.join(AQUI, ".env")
+TOKEN_CACHE = os.path.join(AQUI, ".token_cache.json")
+HIST_CHIPS = os.path.join(AQUI, "chips_historico.jsonl")
 FMT = "%d-%m-%Y %H:%M:%S"
 DIVISOR_RE = re.compile(r"-{2,}\s*(\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}:\d{2})\s*-{2,}")
 TS_RE = re.compile(r"^\[(\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2})\]", re.MULTILINE)
@@ -126,12 +129,9 @@ def tempo_observacao():
 EXCLUIVEIS = set()  # ponytail: códigos a excluir da visão "filtrada" (ex: {"EQP-16"})
 
 
-def carregar_chips():
-    """Login na API DATATEM e busca status de conexão + consumo de todos os simcards."""
-    env = dotenv_values(ENV_CHIPS)
-    base_url = env.get("DATATEM_API_URL", "https://app-gateway.brcaptura.com.br")
+def _login_datatem(env, base_url):
     senha_b64 = base64.b64encode(env["DATATEM_PASSWORD"].encode()).decode()
-    login = requests.post(
+    resp = requests.post(
         f"{base_url}/authorization/api/v1/auth/login",
         json={
             "username": env["DATATEM_USER"], "password": senha_b64,
@@ -139,15 +139,87 @@ def carregar_chips():
             "clientSecret": env["DATATEM_CLIENT_SECRET"],
         }, headers={"User-Agent": "Mozilla/5.0"}, timeout=15,
     ).json()
-    token = login["authenticationToken"]["accessToken"]
+    return resp["authenticationToken"]
+
+
+def _refresh_datatem(base_url, refresh_token):
+    resp = requests.post(
+        f"{base_url}/authorization/api/v1/auth/refresh_token",
+        json={"refreshToken": refresh_token, "grantType": "refresh_token"},
+        headers={"User-Agent": "Mozilla/5.0"}, timeout=15,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _obter_token(env, base_url):
+    """Reaproveita o token salvo em cache; só loga de novo quando expira (ou refresh falha)."""
+    cache = {}
+    try:
+        with open(TOKEN_CACHE, encoding="utf-8") as f:
+            cache = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+
+    agora = time.time()
+    if cache.get("accessToken") and cache.get("expiresAt", 0) > agora + 60:
+        return cache["accessToken"]
+
+    if cache.get("refreshToken"):
+        try:
+            novo = _refresh_datatem(base_url, cache["refreshToken"])
+            cache = {
+                "accessToken": novo["accessToken"], "refreshToken": novo["refreshToken"],
+                "expiresAt": agora + novo.get("expiresIn", 3600),
+            }
+            with open(TOKEN_CACHE, "w", encoding="utf-8") as f:
+                json.dump(cache, f)
+            return cache["accessToken"]
+        except Exception:
+            pass  # refresh token também expirou/inválido -> loga do zero abaixo
+
+    auth = _login_datatem(env, base_url)
+    cache = {
+        "accessToken": auth["accessToken"], "refreshToken": auth["refreshToken"],
+        "expiresAt": agora + auth.get("expiresIn", 3600),
+    }
+    with open(TOKEN_CACHE, "w", encoding="utf-8") as f:
+        json.dump(cache, f)
+    return cache["accessToken"]
+
+
+def _gravar_historico(lista, gerado_em):
+    # ponytail: cresce ~1 linha/chip por execução; se virar gigabyte, rotacionar por mês.
+    with open(HIST_CHIPS, "a", encoding="utf-8") as f:
+        for x in lista:
+            f.write(json.dumps({
+                "ts": gerado_em, "iccid": x["iccid"], "codigo": x["codigo"], "cliente": x["cliente"],
+                "status": x["status"], "conectado": x["conectado"], "pct": x["pct"],
+            }, ensure_ascii=False) + "\n")
+
+
+def carregar_chips():
+    """Busca status de conexão + consumo de todos os simcards na API DATATEM."""
+    env = dotenv_values(ENV_CHIPS)
+    base_url = env.get("DATATEM_API_URL", "https://app-gateway.brcaptura.com.br")
+    token = _obter_token(env, base_url)
     headers = {"Authorization": f"Bearer {token}", "User-Agent": "Mozilla/5.0"}
 
     chips, page = [], 1
     while True:
-        r = requests.get(
+        resp = requests.get(
             f"{base_url}/simcard/connection/v1/connections",
             params={"pageSize": 100, "pageNumber": page}, headers=headers, timeout=15,
-        ).json()
+        )
+        if resp.status_code in (401, 403) and page == 1:
+            # ponytail: token em cache pode ter sido revogado no servidor mesmo sem ter expirado -> força login novo
+            auth = _login_datatem(env, base_url)
+            with open(TOKEN_CACHE, "w", encoding="utf-8") as f:
+                json.dump({"accessToken": auth["accessToken"], "refreshToken": auth["refreshToken"],
+                           "expiresAt": time.time() + auth.get("expiresIn", 3600)}, f)
+            headers["Authorization"] = f"Bearer {auth['accessToken']}"
+            continue
+        r = resp.json()
         content = r.get("content", [])
         if not content:
             break
@@ -201,6 +273,7 @@ def carregar_chips():
         })
     lista.sort(key=lambda x: x["pct"], reverse=True)
     conectados = sum(1 for x in lista if x["conectado"])
+    _gravar_historico(lista, datetime.now().strftime(FMT))
     return {
         "lista": lista,
         "totais": {
@@ -276,16 +349,12 @@ TEMPLATE = r"""<!doctype html>
     font-size:13.5px;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
   .tabBtn.active{opacity:1;border-bottom-color:#2563EB}
 
-  /* Tema A — Comunicação dos equipamentos: Dark Tech / Linear (cobre a área toda) */
-  body.theme-equip{background:#0B0C10}
-  #tabEquip .card,#tabEquip .tile{background:#161822;border:1px solid #26293B}
-  #tabEquip .tile.alerta .v{color:#FF4D4D}
-
-  /* Tema B — Chips e consumo: Dark Glassmorphism (cobre a área toda) */
-  body.theme-chips{background:linear-gradient(160deg, #171233 0%, #0D0F18 45%, #05060A 100%) fixed}
-  #tabChips .card,#tabChips .tile{background:rgba(255,255,255,.04);backdrop-filter:blur(16px);
+  /* Dark Glassmorphism — mesmo tema nas duas abas (cobre a área toda) */
+  body.theme-equip,body.theme-chips{background:linear-gradient(160deg, #171233 0%, #0D0F18 45%, #05060A 100%) fixed}
+  #tabEquip .card,#tabEquip .tile,#tabChips .card,#tabChips .tile{
+    background:rgba(255,255,255,.04);backdrop-filter:blur(16px);
     -webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.09)}
-  #tabChips .tile.alerta .v{color:#FF4D4D}
+  #tabEquip .tile.alerta .v,#tabChips .tile.alerta .v{color:#FF4D4D}
   #tabChips .tile.ok .v{color:#00E676}
 
   .biRow4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}

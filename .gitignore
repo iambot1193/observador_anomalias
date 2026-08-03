@@ -4,3 +4,5 @@ __pycache__/
 /index.html
 /registro_offline_view.xlsx
 /monitor_fundo.log
+/.token_cache.json
+/chips_historico.jsonl

@@ -35,16 +35,12 @@
     font-size:13.5px;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
   .tabBtn.active{opacity:1;border-bottom-color:#2563EB}
 
-  /* Tema A — Comunicação dos equipamentos: Dark Tech / Linear (cobre a área toda) */
-  body.theme-equip{background:#0B0C10}
-  #tabEquip .card,#tabEquip .tile{background:#161822;border:1px solid #26293B}
-  #tabEquip .tile.alerta .v{color:#FF4D4D}
-
-  /* Tema B — Chips e consumo: Dark Glassmorphism (cobre a área toda) */
-  body.theme-chips{background:linear-gradient(160deg, #171233 0%, #0D0F18 45%, #05060A 100%) fixed}
-  #tabChips .card,#tabChips .tile{background:rgba(255,255,255,.04);backdrop-filter:blur(16px);
+  /* Dark Glassmorphism — mesmo tema nas duas abas (cobre a área toda) */
+  body.theme-equip,body.theme-chips{background:linear-gradient(160deg, #171233 0%, #0D0F18 45%, #05060A 100%) fixed}
+  #tabEquip .card,#tabEquip .tile,#tabChips .card,#tabChips .tile{
+    background:rgba(255,255,255,.04);backdrop-filter:blur(16px);
     -webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.09)}
-  #tabChips .tile.alerta .v{color:#FF4D4D}
+  #tabEquip .tile.alerta .v,#tabChips .tile.alerta .v{color:#FF4D4D}
   #tabChips .tile.ok .v{color:#00E676}
 
   .biRow4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
