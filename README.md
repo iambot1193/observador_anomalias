@@ -35,6 +35,10 @@ visualizar o layout e as interações.
   (status de conexão, cliente, operadora ou faixa de consumo) recalcula os outros 3
   gráficos e a tabela na hora, considerando os filtros combinados. Clicar de novo
   remove aquele filtro.
+- Rosca com **total no centro**: por padrão mostra o total geral e, ao selecionar uma
+  fatia, o número central passa a refletir a quantidade daquela fatia (volta ao total
+  quando a seleção é desfeita). O tooltip é reposicionado para a borda externa do anel
+  para nunca cobrir o número central.
 - Barra de filtros ativos com botão para remover individualmente ou limpar tudo
 - Busca por texto + seletores de cliente / operadora / cidade
 - Chips de status rápido (Todos / Atualizados / Atrasados / Sem comunicação), contagem

@@ -752,6 +752,14 @@ const centroRoscaPlugin = {
   }
 };
 
+// Tooltip na borda externa da fatia, nunca sobre o número central da rosca.
+Chart.Tooltip.positioners.roscaFora = function(itens){
+  if (!itens.length) return false;
+  const el = itens[0].element, {left,right,top,bottom} = this.chart.chartArea;
+  const cx=(left+right)/2, cy=(top+bottom)/2, ang=(el.startAngle+el.endAngle)/2, raio=el.outerRadius+14;
+  return {x: cx+Math.cos(ang)*raio, y: cy+Math.sin(ang)*raio};
+};
+
 // --- Legenda com contagem + porcentagem (em vez de só a cor+nome) ---
 function legendComContagem(){
   return {
@@ -1030,7 +1038,7 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
       datasets:[{data:[C.totais.atualizados, C.totais.atrasados, C.totais.semComunicacao],
         backgroundColor:[PAL.green, PAL.amber, PAL.red], borderWidth:0, hoverOffset:8}]},
     options:{maintainAspectRatio:false, onHover:(e,els)=>{e.native.target.style.cursor=els.length?'pointer':'default'},
-      plugins:{legend:{position:'bottom', labels:{color:'#E2E8F0', boxWidth:12, ...legendComContagem()}},
+      plugins:{tooltip:{position:'roscaFora'}, legend:{position:'bottom', labels:{color:'#E2E8F0', boxWidth:12, ...legendComContagem()}},
         centroRosca:{valor:fmtNum(C.totais.chips), rotulo:'Chips Ativos'}},
       onClick:(e,els)=>{
         if(!els.length) return;
@@ -1086,7 +1094,7 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
     data:{labels:operadorasOrd.map(o=>o[0]),
       datasets:[{data:operadorasOrd.map(o=>o[1]), backgroundColor:operadorasOrd.map((o,i)=>operadoraCores[i%operadoraCores.length]), borderWidth:0, hoverOffset:8}]},
     options:{maintainAspectRatio:false, onHover:(e,els)=>{e.native.target.style.cursor=els.length?'pointer':'default'},
-      plugins:{legend:{position:'bottom', labels:{color:'#E2E8F0', boxWidth:12, ...legendComContagem()}},
+      plugins:{tooltip:{position:'roscaFora'}, legend:{position:'bottom', labels:{color:'#E2E8F0', boxWidth:12, ...legendComContagem()}},
         centroRosca:{valor:fmtNum(C.lista.length), rotulo:'Chips'}},
       onClick:(e,els)=>{
         if(!els.length) return;
@@ -1102,7 +1110,7 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
     data:{labels:faixas.map(f=>f.label), datasets:[{data:faixas.map(f=>C.lista.filter(x=>x.pct>=f.min && x.pct<f.max).length),
       backgroundColor:faixas.map(f=>f.cor), borderWidth:0, hoverOffset:8}]},
     options:{maintainAspectRatio:false, onHover:(e,els)=>{e.native.target.style.cursor=els.length?'pointer':'default'},
-      plugins:{legend:{position:'bottom', labels:{color:'#E2E8F0', boxWidth:12, ...legendComContagem()}},
+      plugins:{tooltip:{position:'roscaFora'}, legend:{position:'bottom', labels:{color:'#E2E8F0', boxWidth:12, ...legendComContagem()}},
         centroRosca:{valor:fmtNum(C.lista.length), rotulo:'Chips'}},
       onClick:(e,els)=>{
         if(!els.length) return;
@@ -1135,6 +1143,8 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
     statusChart.data.datasets[0].backgroundColor = [
       ['atualizado',PAL.green],['atrasado',PAL.amber],['sem_comunicacao',PAL.red],
     ].map(([v,cor])=> (!filtroStatus||filtroStatus===v) ? cor : hexAlpha(cor,.25));
+    // fatia selecionada -> contagem dela no centro; sem seleção -> total geral.
+    statusChart.options.plugins.centroRosca.valor = fmtNum(filtroStatus ? (porStatusF[filtroStatus]||0) : Object.values(porStatusF).reduce((a,b)=>a+b,0));
     statusChart.update();
 
     const porClienteF = contarPor(filtrarExceto('cliente'), 'cliente');
@@ -1149,12 +1159,15 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
       const cor = operadoraCores[i%operadoraCores.length];
       return (!filtroOperadora||filtroOperadora===o[0]) ? cor : hexAlpha(cor,.25);
     });
+    operadoraChart.options.plugins.centroRosca.valor = fmtNum(filtroOperadora ? (porOperadoraF[filtroOperadora]||0) : Object.values(porOperadoraF).reduce((a,b)=>a+b,0));
     operadoraChart.update();
 
     const listaFaixaF = filtrarExceto('faixa');
     consumoChart.data.datasets[0].data = faixas.map(f=>listaFaixaF.filter(x=>x.pct>=f.min && x.pct<f.max).length);
     consumoChart.data.datasets[0].backgroundColor = faixas.map(f=>
       (!filtroFaixa||filtroFaixa.label===f.label) ? f.cor : hexAlpha(f.cor,.25));
+    const nFaixaSel = filtroFaixa ? listaFaixaF.filter(x=>x.pct>=filtroFaixa.min && x.pct<filtroFaixa.max).length : listaFaixaF.length;
+    consumoChart.options.plugins.centroRosca.valor = fmtNum(nFaixaSel);
     consumoChart.update();
 
     document.getElementById('cntTodos').textContent = filtrarExceto('status').length;
