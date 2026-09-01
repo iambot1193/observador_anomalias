@@ -323,8 +323,8 @@
 
 <script>
 const PAYLOAD = __DADOS__;
-// ponytail: paletas fixas por tema (não dependem de prefers-color-scheme — os dois temas são sempre escuros)
-// ponytail: paleta suavizada (2026-08-03) - neon (#FF4D4D/#FFC107/#00E676) trocado por
+// nota: paletas fixas por tema (não dependem de prefers-color-scheme — os dois temas são sempre escuros)
+// nota: paleta suavizada (2026-08-03) - neon (#FF4D4D/#FFC107/#00E676) trocado por
 // tons mais elegantes de dark mode; badges em CSS (.badge.*) usam os mesmos hex, manter em sincronia
 const EQUIP = {blue:'#2563EB', red:'#EF4444', amber:'#F59E0B', green:'#10B981',
   ink:'#F5F6FA', ink2:'#9CA3AF', muted:'#6B7280', grid:'#20232F'};
@@ -345,7 +345,7 @@ function hexAlpha(hex, a){
   return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
 }
 function fmtNum(n){ return Number(n).toLocaleString('pt-BR'); }
-// ponytail: ciclo ~ 1min - converte pra "Xd Yh Zm" em vez de forçar cálculo mental no usuário
+// nota: ciclo ~ 1min - converte pra "Xd Yh Zm" em vez de forçar cálculo mental no usuário
 function fmtMin(min){
   min = Math.round(min);
   const d = Math.floor(min/1440), h = Math.floor((min%1440)/60), m = min%60;
@@ -398,7 +398,7 @@ const picoCalloutPlugin = {
     ctx.restore();
   }
 };
-// ponytail: mesmos limiares do texto (>=24h crítico, >=5h atenção) - ajustar aqui se mudar o critério
+// nota: mesmos limiares do texto (>=24h crítico, >=5h atenção) - ajustar aqui se mudar o critério
 function severidade(min){
   if (min >= 1440) return 'critico';
   if (min >= 300) return 'atencao';
@@ -663,7 +663,7 @@ document.querySelectorAll('.tabBtn').forEach(btn=>{
     document.getElementById('tabEquip').style.display = btn.dataset.tab==='equip' ? '' : 'none';
     document.getElementById('tabChips').style.display = btn.dataset.tab==='chips' ? '' : 'none';
     ativarTema(btn.dataset.tab);
-    // ponytail: gráficos criados com a aba escondida (display:none) ficam com canvas 0x0 e
+    // nota: gráficos criados com a aba escondida (display:none) ficam com canvas 0x0 e
     // o Chart.js não redimensiona sozinho quando ela aparece - força um resize ao trocar de aba.
     document.querySelectorAll('canvas').forEach(cv => Chart.getChart(cv)?.resize());
   });

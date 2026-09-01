@@ -31,7 +31,7 @@ RESET_LOG = os.path.join(AQUI, "chips_reset_historico.jsonl")
 FMT = "%d-%m-%Y %H:%M:%S"
 DIVISOR_RE = re.compile(r"-{2,}\s*(\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}:\d{2})\s*-{2,}")
 TS_RE = re.compile(r"^\[(\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2})\]", re.MULTILINE)
-GAP_LIMITE_MIN = 10  # ponytail: acima disso considera que o script de monitoramento parou
+GAP_LIMITE_MIN = 10  # nota: acima disso considera que o script de monitoramento parou
 
 
 def carregar():
@@ -52,7 +52,7 @@ def carregar():
 
 def agregar(linhas, ciclos):
     por_codigo = defaultdict(lambda: {"ciclos": 0, "resets": 0, "primeiro": None, "ultimo": None})
-    # ponytail: comparar os dt parseados, não a string "registrada" direto - "DD-MM-YYYY" como
+    # nota: comparar os dt parseados, não a string "registrada" direto - "DD-MM-YYYY" como
     # string ordena errado entre meses/dias diferentes (bug real encontrado 2026-08-03: "01-08"
     # perdia pra "31-07" porque '0' < '3' no primeiro caractere, mesmo Ago vindo depois de Jul).
     primeiro_dt, ultimo_dt = {}, {}
@@ -136,7 +136,7 @@ def tempo_observacao():
     }
 
 
-EXCLUIVEIS = set()  # ponytail: códigos a excluir da visão "filtrada" (ex: {"EQP-16"})
+EXCLUIVEIS = set()  # nota: códigos a excluir da visão "filtrada" (ex: {"EQP-16"})
 
 
 def _login_datatem(env, base_url):
@@ -199,7 +199,7 @@ def _obter_token(env, base_url):
 
 
 def _gravar_historico(lista, gerado_em):
-    # ponytail: cresce ~1 linha/chip por execução; se virar gigabyte, rotacionar por mês.
+    # nota: cresce ~1 linha/chip por execução; se virar gigabyte, rotacionar por mês.
     with open(HIST_CHIPS, "a", encoding="utf-8") as f:
         for x in lista:
             f.write(json.dumps({
@@ -222,7 +222,7 @@ def carregar_chips():
             params={"pageSize": 100, "pageNumber": page}, headers=headers, timeout=15,
         )
         if resp.status_code in (401, 403) and page == 1:
-            # ponytail: token em cache pode ter sido revogado no servidor mesmo sem ter expirado -> força login novo
+            # nota: token em cache pode ter sido revogado no servidor mesmo sem ter expirado -> força login novo
             auth = _login_datatem(env, base_url)
             with open(TOKEN_CACHE, "w", encoding="utf-8") as f:
                 json.dump({"accessToken": auth["accessToken"], "refreshToken": auth["refreshToken"],
@@ -435,7 +435,7 @@ def main():
           f"Observado {obs['observado']}, perdido {obs['perdido']}.")
 
 
-# ponytail: Chart.js via CDN (a máquina do monitor está online). Se precisar 100%
+# nota: Chart.js via CDN (a máquina do monitor está online). Se precisar 100%
 # offline, baixar chart.umd.min.js pra pasta e trocar o src.
 with open(os.path.join(AQUI, "template.html"), encoding="utf-8") as _f:
     TEMPLATE = _f.read()
