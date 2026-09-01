@@ -438,7 +438,11 @@ Chart.Tooltip.positioners.roscaFora = function(itens){
 };
 
 // --- Legenda com contagem + porcentagem (em vez de só a cor+nome) ---
-function legendComContagem(){
+// nota: fontColor é obrigatório aqui. O Chart.js desenha o texto com
+// ctx.fillStyle = legendItem.fontColor, e quem preenche esse campo é o
+// generateLabels PADRÃO (a partir de labels.color). Ao substituir o gerador,
+// labels.color vira inerte e o texto sai no preto default do canvas.
+function legendComContagem(cor){
   return {
     generateLabels(chart){
       const ds = chart.data.datasets[0];
@@ -446,6 +450,7 @@ function legendComContagem(){
       return chart.data.labels.map((l,i)=>({
         text: `${l}: ${fmtNum(ds.data[i])} (${(ds.data[i]/total*100).toFixed(1)}%)`,
         fillStyle: ds.backgroundColor[i], strokeStyle: ds.backgroundColor[i], index: i,
+        fontColor: cor,
       }));
     }
   };
@@ -715,7 +720,7 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
       datasets:[{data:[C.totais.atualizados, C.totais.atrasados, C.totais.semComunicacao],
         backgroundColor:[PAL.green, PAL.amber, PAL.red], borderWidth:0, hoverOffset:8}]},
     options:{maintainAspectRatio:false, onHover:(e,els)=>{e.native.target.style.cursor=els.length?'pointer':'default'},
-      plugins:{tooltip:{position:'roscaFora'}, legend:{position:'bottom', labels:{color:'#E2E8F0', boxWidth:12, ...legendComContagem()}},
+      plugins:{tooltip:{position:'roscaFora'}, legend:{position:'bottom', labels:{boxWidth:12, ...legendComContagem('#E2E8F0')}},
         centroRosca:{valor:fmtNum(C.totais.chips), rotulo:'Chips Ativos'}},
       onClick:(e,els)=>{
         if(!els.length) return;
@@ -771,7 +776,7 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
     data:{labels:operadorasOrd.map(o=>o[0]),
       datasets:[{data:operadorasOrd.map(o=>o[1]), backgroundColor:operadorasOrd.map((o,i)=>operadoraCores[i%operadoraCores.length]), borderWidth:0, hoverOffset:8}]},
     options:{maintainAspectRatio:false, onHover:(e,els)=>{e.native.target.style.cursor=els.length?'pointer':'default'},
-      plugins:{tooltip:{position:'roscaFora'}, legend:{position:'bottom', labels:{color:'#E2E8F0', boxWidth:12, ...legendComContagem()}},
+      plugins:{tooltip:{position:'roscaFora'}, legend:{position:'bottom', labels:{boxWidth:12, ...legendComContagem('#E2E8F0')}},
         centroRosca:{valor:fmtNum(C.lista.length), rotulo:'Chips'}},
       onClick:(e,els)=>{
         if(!els.length) return;
@@ -787,7 +792,7 @@ if (PAYLOAD.chips && !PAYLOAD.chips.erro) {
     data:{labels:faixas.map(f=>f.label), datasets:[{data:faixas.map(f=>C.lista.filter(x=>x.pct>=f.min && x.pct<f.max).length),
       backgroundColor:faixas.map(f=>f.cor), borderWidth:0, hoverOffset:8}]},
     options:{maintainAspectRatio:false, onHover:(e,els)=>{e.native.target.style.cursor=els.length?'pointer':'default'},
-      plugins:{tooltip:{position:'roscaFora'}, legend:{position:'bottom', labels:{color:'#E2E8F0', boxWidth:12, ...legendComContagem()}},
+      plugins:{tooltip:{position:'roscaFora'}, legend:{position:'bottom', labels:{boxWidth:12, ...legendComContagem('#E2E8F0')}},
         centroRosca:{valor:fmtNum(C.lista.length), rotulo:'Chips'}},
       onClick:(e,els)=>{
         if(!els.length) return;
