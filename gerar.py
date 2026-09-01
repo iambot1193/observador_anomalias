@@ -27,6 +27,7 @@ SAIDA = os.path.join(AQUI, "index.html")
 ENV_CHIPS = os.path.join(AQUI, ".env")
 TOKEN_CACHE = os.path.join(AQUI, ".token_cache.json")
 HIST_CHIPS = os.path.join(AQUI, "chips_historico.jsonl")
+RESET_LOG = os.path.join(AQUI, "chips_reset_historico.jsonl")
 FMT = "%d-%m-%Y %H:%M:%S"
 DIVISOR_RE = re.compile(r"-{2,}\s*(\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}:\d{2})\s*-{2,}")
 TS_RE = re.compile(r"^\[(\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2})\]", re.MULTILINE)
@@ -299,6 +300,113 @@ def carregar_chips():
     }
 
 
+def carregar_ciclos_reset():
+    """Cada linha do log é uma leva do reset automático (~1h). Retorna em ordem
+    cronológica o que foi enviado em cada leva, pra download avulso na tela."""
+    ciclos = []
+    try:
+        with open(RESET_LOG, encoding="utf-8") as f:
+            linhas = f.readlines()
+    except FileNotFoundError:
+        return ciclos
+    for linha in linhas:
+        try:
+            r = json.loads(linha)
+        except json.JSONDecodeError:
+            continue
+        lote_falhou = "status_http" in r and r["status_http"] != 200
+        ciclos.append({
+            "ts": r.get("ts"),
+            "enviados": [] if lote_falhou else r.get("enviados", []),
+            "jaPendentes": r.get("ja_pendentes", []),
+            "falhas": r.get("falhas", []),
+        })
+    return ciclos
+
+
+def carregar_snapshots_chips():
+    """Agrupa chips_historico.jsonl por ts de execução (cada carregar_chips() grava um grupo)."""
+    grupos = defaultdict(list)
+    try:
+        with open(HIST_CHIPS, encoding="utf-8") as f:
+            for linha in f:
+                try:
+                    r = json.loads(linha)
+                except json.JSONDecodeError:
+                    continue
+                grupos[r["ts"]].append(r)
+    except FileNotFoundError:
+        pass
+    return grupos
+
+
+def anexar_snapshots(ciclos, snapshots):
+    """Pra cada leva de reset, acha o snapshot de chips mais próximo (gravado pela
+    mesma chamada de carregar_chips() que gerou aquela leva)."""
+    tss_ordenados = sorted(snapshots, key=lambda s: datetime.strptime(s, FMT))
+    for c in ciclos:
+        alvo = datetime.strptime(c["ts"], FMT)
+        candidatos = [t for t in tss_ordenados if datetime.strptime(t, FMT) <= alvo]
+        c["snapshot"] = snapshots[candidatos[-1]] if candidatos else []
+
+
+def calcular_eficacia_resets(ciclos, snapshots):
+    """Pra cada reset enviado, descobre se o chip voltou a comunicar (status virou
+    'atualizado' num snapshot) antes do próximo ciclo de reset - reaproveita os
+    snapshots de alta frequência já gravados em chips_historico.jsonl, não precisa
+    de nenhum dado novo. Marca cada item de "enviados" com reconectou (True/False/
+    None - None = ciclo mais recente, ainda sem próximo ciclo pra comparar) e
+    reconectouEm (ts ou None)."""
+    tss_ordenados = sorted(snapshots, key=lambda s: datetime.strptime(s, FMT))
+    por_ts = {t: {r["iccid"]: r for r in snapshots[t]} for t in tss_ordenados}
+    for i, c in enumerate(ciclos):
+        inicio = datetime.strptime(c["ts"], FMT)
+        fim = datetime.strptime(ciclos[i + 1]["ts"], FMT) if i + 1 < len(ciclos) else None
+        janela = [t for t in tss_ordenados
+                  if datetime.strptime(t, FMT) > inicio and (fim is None or datetime.strptime(t, FMT) < fim)]
+        for item in c.get("enviados", []):
+            reconectou_em = next(
+                (t for t in janela if por_ts[t].get(item["iccid"], {}).get("status") == "atualizado"), None)
+            item["reconectou"] = None if fim is None else bool(reconectou_em)
+            item["reconectouEm"] = reconectou_em
+
+
+def carregar_reset_chips():
+    """Lê o histórico de resets automáticos (reset_chips_datatem.py, script privado -
+    não faz parte deste repo de exemplo). Retorna, por ICCID, o desfecho mais recente:
+    reset confirmado (enviado) ou ainda aguardando. Registros antigos que marcavam o
+    lote inteiro como enviado sem checar o HTTP de fato (campo status_http != 200 no
+    nível do registro) são tratados como não enviados, mesmo que o campo "enviados"
+    original diga o contrário."""
+    estado = {}
+    try:
+        with open(RESET_LOG, encoding="utf-8") as f:
+            linhas = f.readlines()
+    except FileNotFoundError:
+        return estado
+
+    for linha in linhas:
+        try:
+            r = json.loads(linha)
+        except json.JSONDecodeError:
+            continue
+        ts = r.get("ts")
+        lote_falhou = "status_http" in r and r["status_http"] != 200
+
+        def registrar(item, resultado):
+            iccid = item["iccid"] if isinstance(item, dict) else item
+            rotulo = item.get("estado") if isinstance(item, dict) else None
+            estado[iccid] = {"quando": ts, "resultado": resultado, "estado": rotulo}
+
+        for item in r.get("enviados", []):
+            registrar(item, "aguardando" if lote_falhou else "enviado")
+        for item in r.get("ja_pendentes", []):
+            registrar(item, "aguardando")
+        for item in r.get("falhas", []):
+            registrar(item, "aguardando")
+    return estado
+
+
 def main():
     linhas, ciclos = carregar()
     completo = agregar(linhas, ciclos)
@@ -306,6 +414,14 @@ def main():
     obs = tempo_observacao()
     try:
         chips = carregar_chips()
+        reset_hist = carregar_reset_chips()
+        for x in chips["lista"]:
+            x["resetInfo"] = reset_hist.get(x["iccid"]) if x["status"] in ("atrasado", "sem_comunicacao") else None
+        ciclos_reset = carregar_ciclos_reset()
+        snapshots = carregar_snapshots_chips()
+        anexar_snapshots(ciclos_reset, snapshots)
+        calcular_eficacia_resets(ciclos_reset, snapshots)
+        chips["ciclosReset"] = ciclos_reset
     except Exception as e:
         chips = {"erro": str(e)}
     payload = {"observacao": obs, "completo": completo, "filtrado": filtrado, "chips": chips}
