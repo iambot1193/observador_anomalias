@@ -1,5 +1,7 @@
 # Observador de Anomalias
 
+**[Ver o dashboard ao vivo →](https://iambot1193.github.io/observador_anomalias/)** (dados fictícios)
+
 Dashboard estático (sem backend, sem build step) com duas visões operacionais:
 
 1. **Comunicação dos equipamentos** — quais equipamentos ficaram fora do ar, por quanto
@@ -13,12 +15,22 @@ um `index.html` autocontido: todo o payload vira JSON embutido na página, e o C
 
 ## Ver sem configurar nada
 
+O [dashboard publicado](https://iambot1193.github.io/observador_anomalias/) é gerado por
+este script a cada push. Para rodar localmente:
+
 ```
 python gerar_exemplo.py
 ```
 
 Gera `exemplo/index.html` com dados 100% fictícios (não chama nenhuma API), só pra
 visualizar o layout e as interações.
+
+## Retrospectiva de incidente
+
+[RETROSPECTIVA.md](RETROSPECTIVA.md) — análise do incidente "o dashboard volta sozinho
+para uma versão antiga": duas causas independentes por trás do mesmo sintoma, como cada
+uma foi isolada (e o que foi descartado no caminho), os erros de arquitetura que tornaram
+o bug possível e os erros cometidos durante a própria investigação.
 
 ## Funcionalidades
 
