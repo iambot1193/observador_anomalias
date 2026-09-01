@@ -13,6 +13,10 @@ Um único script Python lê os dados (planilha de monitoramento + API de SIM car
 um `index.html` autocontido: todo o payload vira JSON embutido na página, e o Chart.js
 (via CDN) desenha os gráficos no navegador. Não precisa de servidor rodando.
 
+"Anomalia" aqui é regra simples, não ML: gap de leitura acima de um limiar vira
+"offline" ([`GAP_LIMITE_MIN`](gerar.py)), pixel vermelho num badge vira alerta
+(limiar HSV em `observador.py`, fora deste repo). Sem estatística, sem modelo.
+
 ![Aba de equipamentos: KPIs e ranking por tempo offline](assets/equipamentos.png)
 
 Tempo observado, tempo perdido por falha do próprio script, e o ranking de quanto cada
@@ -134,6 +138,15 @@ por chip (timestamp, ICCID, status, % consumido) nesse arquivo append-only. Serv
 base pra qualquer análise de tendência ou alerta futuro ("esse chip está sem
 comunicação há quantas execuções?") — o dashboard atual só mostra o snapshot mais
 recente, não lê esse histórico ainda.
+
+## Teste
+
+```bash
+python test_gerar.py   # ou: pytest
+```
+
+Cobre a agregação (`agregar`, `calcular_perdido`, `fmt_horas`) — a parte não trivial do
+script. Rodado no CI a cada push.
 
 ## Stack
 

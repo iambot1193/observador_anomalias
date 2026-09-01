@@ -13,6 +13,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
+      - run: python test_gerar.py
       # Smoke test: o gerador tem que produzir o dashboard de exemplo sem erro.
       - run: python gerar_exemplo.py
       - run: test -s exemplo/index.html
