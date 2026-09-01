@@ -13,6 +13,34 @@ Um único script Python lê os dados (planilha de monitoramento + API de SIM car
 um `index.html` autocontido: todo o payload vira JSON embutido na página, e o Chart.js
 (via CDN) desenha os gráficos no navegador. Não precisa de servidor rodando.
 
+![Aba de equipamentos: KPIs e ranking por tempo offline](assets/equipamentos.png)
+
+Tempo observado, tempo perdido por falha do próprio script, e o ranking de quanto cada
+equipamento ficou fora do ar — colorido por faixa (vermelho ≥ 24 h, amarelo 5–24 h, azul
+abaixo de 5 h).
+
+![Linha do tempo de indisponibilidade e distribuição da simultaneidade](assets/timeline.png)
+
+Quantos equipamentos estiveram offline **ao mesmo tempo**, ao longo do período, com o pico
+anotado no gráfico. Combinar as séries dos dois sites exigiu forward-fill por site: clocks
+independentes fazem correspondência exata de timestamp inventar quedas que não houve
+(detalhado na [retrospectiva](RETROSPECTIVA.md)).
+
+### Cross-filtering
+
+Clicar numa fatia, barra ou seletor recalcula os outros três gráficos, os KPIs e a tabela
+na hora — combinando os filtros ativos. Clicar de novo remove aquele filtro.
+
+![Aba de chips, sem filtro: 12 chips](assets/chips.png)
+
+Sem filtro: 12 chips, divididos entre 3 clientes, 3 operadoras e 4 faixas de consumo.
+
+![Mesma aba filtrada por operadora Vivo e status Atualizados: 2 chips](assets/chips-filtrado.png)
+
+Com **Vivo** + **Atualizados** selecionados: os quatro gráficos recalculam para os 2 chips
+que sobram, as fatias fora da seleção ficam dessaturadas, e o número no centro de cada
+rosca passa a refletir o subconjunto em vez do total.
+
 ## Ver sem configurar nada
 
 O [dashboard publicado](https://iambot1193.github.io/observador_anomalias/) é gerado por
