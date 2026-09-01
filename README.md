@@ -1,5 +1,7 @@
 # Observador de Anomalias
 
+[![CI](https://github.com/iambot1193/observador_anomalias/actions/workflows/ci.yml/badge.svg)](https://github.com/iambot1193/observador_anomalias/actions/workflows/ci.yml)
+
 **[Ver o dashboard ao vivo →](https://iambot1193.github.io/observador_anomalias/)** (dados fictícios)
 
 Dashboard estático (sem backend, sem build step) com duas visões operacionais:
